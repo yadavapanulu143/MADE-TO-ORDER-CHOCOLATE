@@ -26,12 +26,12 @@
     <module>shared/common-redis</module>
     <module>shared/common-test</module>
     <module>services/identity-service</module>
+    <module>gateway</module>
     <!--
       Modules below are not implemented yet. A module listed here without a pom.xml breaks the whole
       reactor, so every build fails before it starts, including the ones that would otherwise pass.
       Uncomment each entry as the service is implemented, in the order the plan defines.
     -->
-    <!-- <module>gateway</module> -->
     <!-- <module>services/catalog-service</module> -->
     <!-- <module>services/order-service</module> -->
     <!-- <module>services/payment-service</module> -->
@@ -57,6 +57,7 @@
     <greenmail.version>2.1.15</greenmail.version>
     <nimbus-jose-jwt.version>9.40</nimbus-jose-jwt.version>
     <logstash-encoder.version>8.1</logstash-encoder.version>
+    <mockwebserver.version>4.12.0</mockwebserver.version>
 
     <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
 
@@ -138,6 +139,12 @@
         <groupId>net.logstash.logback</groupId>
         <artifactId>logstash-logback-encoder</artifactId>
         <version>${logstash-encoder.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>mockwebserver</artifactId>
+        <version>${mockwebserver.version}</version>
+        <scope>test</scope>
       </dependency>
 
       <!-- Internal shared modules -->

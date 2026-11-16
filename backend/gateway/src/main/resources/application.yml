@@ -1,0 +1,96 @@
+server:
+  port: 8080
+  shutdown: graceful
+
+spring:
+  application:
+    name: api-gateway
+  # The gateway proxies to services; it owns no database, so no datasource, JPA or Flyway here.
+  data:
+    redis:
+      host: ${CHOCO_REDIS_HOST:localhost}
+      port: ${CHOCO_REDIS_PORT:6379}
+      password: ${CHOCO_REDIS_PASSWORD:choco_redis_pw}
+      timeout: 2s
+  # Proxy client timeouts, so a stalled service cannot pin a gateway thread indefinitely. The
+  # gateway-route-specific spring.cloud.gateway...http-client.* keys are deprecated in favour of
+  # these standard client keys.
+  http:
+    client:
+      connect-timeout: ${CHOCO_GW_CONNECT_TIMEOUT:2s}
+      read-timeout: ${CHOCO_GW_READ_TIMEOUT:10s}
+
+choco:
+  gateway:
+    services:
+      identity: ${CHOCO_IDENTITY_URI:http://localhost:8081}
+      catalog: ${CHOCO_CATALOG_URI:http://localhost:8082}
+      order: ${CHOCO_ORDER_URI:http://localhost:8083}
+      payment: ${CHOCO_PAYMENT_URI:http://localhost:8084}
+      fulfilment: ${CHOCO_FULFILMENT_URI:http://localhost:8085}
+      notification: ${CHOCO_NOTIFICATION_URI:http://localhost:8086}
+      reporting: ${CHOCO_REPORTING_URI:http://localhost:8087}
+    rate-limit:
+      enabled: ${CHOCO_GW_RATE_LIMIT_ENABLED:true}
+      requests-per-window: ${CHOCO_GW_RL_REQUESTS:300}
+      auth-requests-per-window: ${CHOCO_GW_RL_AUTH_REQUESTS:60}
+      window: ${CHOCO_GW_RL_WINDOW:PT1M}
+  security:
+    issuer: ${CHOCO_JWT_ISSUER:choco-identity}
+    # Token verification is identical to every service: the gateway holds only the public keys.
+    jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+  cors:
+    allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,gateway
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${CHOCO_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${CHOCO_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        # Count-based window of the last 20 calls; open once 50% have failed and at least 5 were
+        # recorded, so a single blip on a quiet service does not trip the breaker.
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 5
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      identity:
+        base-config: default
+      catalog:
+        base-config: default
+      order:
+        base-config: default
+      payment:
+        base-config: default
+      fulfilment:
+        base-config: default
+      notification:
+        base-config: default
+      reporting:
+        base-config: default
+
+logging:
+  level:
+    com.choco: ${CHOCO_LOG_LEVEL:INFO}

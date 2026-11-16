@@ -67,10 +67,10 @@ the backlog can be pushed in one step when access is restored.
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
 | 2.1 | Service module skeleton (5-module Clean Architecture each) | DONE | identity-service: domain / application / adapters-out / adapters-in / app |
-| 2.2 | API Gateway routing | TODO | `gateway/` module not created |
+| 2.2 | API Gateway routing | DONE | `gateway/` module on port 8080; one route per service from `RoutingConfiguration`; edge JWT validation via the shared `JwtDecoder`; per-IP Redis-backed throttle (`EdgeRateLimitFilter`); retry (GET only) + Resilience4j circuit breaker per service with an RFC 9457 503 fallback; CORS from the shared allow-list. 34 tests green (13 unit + 21 IT: Routing, RateLimit, CircuitBreaker, GatewaySecurity) |
 | 2.3 | Flyway migrations per service | DONE | `identity-app/src/main/resources/db/migration/V1__identity_schema.sql` |
 | 2.4 | Redis integration (cache, rate limiting) | DONE | `shared/common-redis`; `RedisRateLimiterIT` (4 tests) green against a real Redis |
-| 2.5 | Inter-service REST client with timeouts/retries | TODO | No consumer yet; identity is self-contained |
+| 2.5 | Inter-service REST client with timeouts/retries | DONE | Gateway proxy client timeouts (`spring.http.client.*`), GET-only retry and a circuit breaker per route; a business service client will reuse the same policy when the first consumer appears |
 | 2.6 | Health checks + readiness probes | DONE | `/actuator/health` public; probes enabled |
 
 ## Phase 3 — Authentication and security
@@ -240,7 +240,17 @@ the backlog can be pushed in one step when access is restored.
 | identity-adapters-out | 6 | green |
 | identity-adapters-in | 6 | green |
 | identity-app | 40 (6 unit + 34 integration) | green |
-| **Total** | **316** | **green** |
+| api-gateway | 34 (13 unit + 21 integration) | green |
+| **Total** | **350** | **green** |
+
+### API Gateway integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| RoutingIT | 9 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved |
+| RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
+| CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
+| GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
 
 ### Identity integration tests (`mvn verify`)
 

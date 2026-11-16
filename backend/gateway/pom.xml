@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.choco</groupId>
+    <artifactId>choco-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+  <artifactId>api-gateway</artifactId>
+  <name>API Gateway (single entry point)</name>
+
+  <!--
+    The gateway is deliberately a single Maven module, not a five-module Clean Architecture project.
+
+    Clean Architecture separates business rules from delivery and infrastructure so the rules can be
+    tested without either. The gateway holds no business rules: it authenticates the caller, applies
+    an edge rate limit and forwards the request to the service that owns the rule. There is no
+    aggregate to keep framework-free and no use case to test in isolation, so splitting it into
+    domain/application/adapters layers would add four modules of ceremony around one routing
+    configuration. The trade-off is recorded here so a later reader does not read the flat layout as
+    an oversight.
+  -->
+  <dependencies>
+    <!-- Servlet-stack gateway, matching the rest of the platform (Spring MVC, not WebFlux). -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-gateway-server-webmvc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.choco</groupId>
+      <artifactId>common-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.choco</groupId>
+      <artifactId>common-security</artifactId>
+    </dependency>
+    <!-- Shared Redis rate limiter, so edge throttling uses the same atomic implementation. -->
+    <dependency>
+      <groupId>com.choco</groupId>
+      <artifactId>common-redis</artifactId>
+    </dependency>
+
+    <!-- Retries: the reactive/blocking retry filter needs spring-retry on the classpath. -->
+    <dependency>
+      <groupId>org.springframework.retry</groupId>
+      <artifactId>spring-retry</artifactId>
+    </dependency>
+    <!-- Circuit breaking for the routes that talk to a downstream service. -->
+    <dependency>
+      <groupId>org.springframework.cloud</groupId>
+      <artifactId>spring-cloud-starter-circuitbreaker-resilience4j</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>net.logstash.logback</groupId>
+      <artifactId>logstash-logback-encoder</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.choco</groupId>
+      <artifactId>common-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Stub downstream service, so routing/retry/circuit-breaker tests need no real backend. -->
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.choco.gateway.GatewayApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

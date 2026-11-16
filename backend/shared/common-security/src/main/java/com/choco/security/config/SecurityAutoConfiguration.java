@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
@@ -141,7 +142,8 @@ public class SecurityAutoConfiguration {
      * any site call the API with the user's token; only the two known frontend origins are listed.
      */
     @Bean
-    @ConditionalOnMissingBean
+    @Primary
+    @ConditionalOnMissingBean(name = "corsConfigurationSource")
     public CorsConfigurationSource corsConfigurationSource(
             @Value("${choco.cors.allowed-origins:http://localhost:5173,http://localhost:5174}") List<String> allowedOrigins) {
         CorsConfiguration configuration = new CorsConfiguration();

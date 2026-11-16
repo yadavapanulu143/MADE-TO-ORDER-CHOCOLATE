@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * Single place that turns exceptions into RFC 9457 responses.
@@ -95,9 +96,9 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.METHOD_NOT_ALLOWED, "HTTP method not supported for this resource", null, request);
     }
 
-    @ExceptionHandler(NoHandlerFoundException.class)
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
     public ResponseEntity<com.choco.web.json.ApiError> handleNotFound(
-            NoHandlerFoundException ex, HttpServletRequest request) {
+            Exception ex, HttpServletRequest request) {
         return build(ErrorCode.NOT_FOUND, "Resource not found", null, request);
     }
 

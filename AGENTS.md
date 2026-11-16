@@ -80,6 +80,7 @@ backend/shared/common-security     Argon2id/BCrypt-15 hashing, RS256 JWT, RBAC
 backend/shared/common-events       event envelope, transactional outbox, RabbitMQ topology
 backend/shared/common-redis        Redis rate limiter + disables Redis repository scanning
 backend/shared/common-test         Testcontainers definitions, port fakes
+backend/gateway                    Spring Cloud Gateway (server MVC): routing, edge auth, throttle
 backend/services/<name>/           five modules each: -domain -application -adapters-out -adapters-in -app
 infra/                             postgres init, prometheus, grafana, loki, tempo, otel
 ```
@@ -218,9 +219,30 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     dead sink), and the base class **reserves a free HTTP port** so `server.port` and
     `choco.security.jwk-set-uri` agree and tokens are verified through the real JWKS fetch.
 
+26. **`@ConditionalOnMissingBean` on a bean whose type is implemented by a framework bean silently
+    disables yours.** The shared CORS bean is typed `CorsConfigurationSource`, and Spring MVC's
+    `mvcHandlerMappingIntrospector` also implements that interface. It was registered first, so the
+    condition saw "a bean already exists", skipped the real CORS configuration, and the introspector
+    was injected in its place — CORS was off for every service with no error. The condition is now
+    `@ConditionalOnMissingBean(name = "corsConfigurationSource")` and the bean is `@Primary`. A
+    preflight integration test (allowed origin answered, unknown origin never wildcarded) is what
+    caught it; a unit test of the config object never would have.
+
+27. **A circuit breaker does not treat a 5xx response as a failure by default.** In Spring Cloud
+    Gateway MVC `CircuitBreakerConfig.statusCodes` starts empty, so a service returning a steady
+    stream of 500s looks perfectly healthy to the breaker — it only trips on a thrown exception such
+    as a connection failure. Name the codes (`500`, `502`, `503`, `504`) or the breaker protects
+    against crashes but not against a service that is up and answering with errors. Also note the
+    fallback URI must use the `forward:` scheme; any other scheme fails at context load.
+
+28. **Spring 6.1+ throws `NoResourceFoundException`, not `NoHandlerFoundException`, for an unmatched
+    path.** The shared `GlobalExceptionHandler` mapped only the older exception, so an unknown path
+    returned 500 instead of 404. Both are now mapped to the not-found handler. This is what makes the
+    gateway's "unrouted path" behaviour a 404 rather than a 500.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **316 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **350 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -235,7 +257,27 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
 | identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
-| **total** | **316** |
+| api-gateway | 34 (13 unit + 21 integration: real Redis) |
+| **total** | **350** |
+
+### API Gateway tests (`*IT`, run by `mvn verify`)
+
+`gateway` carries four integration classes under `src/test/java/com/choco/gateway/it`
+(`AbstractGatewayIntegrationTest` starts real Redis via Testcontainers and serves the gateway on a
+random port). Each downstream is a MockWebServer, so the tests assert what the gateway *forwarded*,
+not only the status it returned.
+
+- `RoutingIT` — a public request reaches its service; a protected one arrives with the token intact;
+  a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an
+  unknown path is not routed; the correlation id is preserved.
+- `RateLimitIT` — a burst is throttled once the allowance is spent; auth paths use the tighter
+  allowance; a throttled request never reaches the service; the auth and general buckets are counted
+  independently.
+- `CircuitBreakerIT` — repeated 5xx from a service opens the breaker and the gateway answers 503 with
+  an RFC 9457 body instead of propagating the error.
+- `GatewaySecurityIT` — registration and JWKS are public; the customer profile path is not; a 401
+  carries a problem-detail body; an allowed-origin preflight is answered with that origin and an
+  unknown origin is never wildcarded.
 
 ### Integration tests (`*IT`, run by `mvn verify`)
 

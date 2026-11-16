@@ -14,8 +14,8 @@ Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` c
 
 ## GitHub push status — BLOCKED (environment, not code)
 
-The permanent rule to push each verified milestone cannot currently be satisfied. **Ten local
-commits (through `d507fa2`) are unpushed**, and every push attempt fails:
+The permanent rule to push each verified milestone cannot currently be satisfied. **Eleven local
+commits (through `a69f8f2`, the API Gateway) are unpushed**, and every push attempt fails:
 
 ```
 remote: Permission to yadavapanulu143/MADE-TO-ORDER-CHOCOLATE.git denied to yadavapanulu143.

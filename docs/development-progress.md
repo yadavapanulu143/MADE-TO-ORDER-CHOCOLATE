@@ -12,6 +12,32 @@ including OTP verification and token rotation (`CustomerJourneyIT`), administrat
 the customer/admin boundary (`AdminJourneyIT`), and outbox-to-broker delivery (`OutboxRelayIT`). The
 Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container.
 
+## GitHub push status — BLOCKED (environment, not code)
+
+The permanent rule to push each verified milestone cannot currently be satisfied. **Ten local
+commits (through `d507fa2`) are unpushed**, and every push attempt fails:
+
+```
+remote: Permission to yadavapanulu143/MADE-TO-ORDER-CHOCOLATE.git denied to yadavapanulu143.
+fatal: unable to access '...': The requested URL returned error: 403
+```
+
+Diagnosis: both credentials available in this environment are GitHub App installation tokens with
+**read-only** contents permission, not a user PAT:
+
+- `$GITHUB_TOKEN` — authenticates as `yadavapanulu143`; the API reports `permissions.push: true` for
+  the repository (that field reflects the *user*, not the token), but every write endpoint returns
+  `403 Resource not accessible by integration` (`git/blobs`, `git/refs`), and `git push` is denied.
+- The OpenHands credential-helper exchange (`~/.openhands/git-credential-helper github`) yields the
+  same class of token with the same `403` on writes.
+
+Local commits are preserved intact. No force-push, history rewrite or credential handling was
+performed. **To unblock:** grant the GitHub App `contents: write` (and `pull_requests: write` for PR
+automation) on `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE`, or supply a user PAT with `repo` scope via
+`$GITHUB_TOKEN`. Once write access exists, `git push origin main` will publish all unpushed commits
+in order. Development continues locally per rule 6; each milestone's commit hash is recorded here so
+the backlog can be pushed in one step when access is restored.
+
 ---
 
 ## Phase 1 — Project foundation

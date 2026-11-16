@@ -3,6 +3,55 @@
 Single-seller, made-to-order chocolate e-commerce platform. See `docs/architecture.md` for the
 design and `docs/development-progress.md` for the requirement-by-requirement status.
 
+## Permanent development and execution rules
+
+These rules were set by the project owner and apply to **every** remaining module, milestone,
+integration and future session. They are not optional and are not renegotiated per task.
+
+1. **Automatically push every successful commit to GitHub.** After each module or meaningful
+   milestone: implement, run all required tests (including the cumulative regression suite), fix
+   every failure, review the full diff for accidental changes/secrets/generated files, update the
+   docs and tracker, create a meaningful commit, push it, and verify the remote has it. Push only
+   tested and committed work. Never push failing tests. Never force-push or rewrite remote history.
+   Never commit or push credentials, passwords, API keys, tokens or certificates. If auth,
+   permissions, network or a remote conflict blocks the push, report the exact issue, keep the local
+   commit and continue only when it is safe. Never claim a push succeeded unless it did. Do not wait
+   for approval after each successful commit.
+2. **Follow the development sequence strictly.** Identity Service (done, `d507fa2`) → API Gateway →
+   Catalog/Product → Order Management → Razorpay Payment → Made-to-Order Production →
+   Seller-Managed Delivery → Notification → Invoices/Reporting/Exports → Customer Storefront →
+   Admin Dashboard → Docker Compose/Deployment/CI-CD → End-to-End Testing and Handover. No
+   priority-based reordering. Finish one module before starting the next, then proceed without
+   asking.
+3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
+   execution path, branch, boundary, malformed input, invalid transition, authz boundary,
+   customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
+   constraint and migration, request/response validation, failure recovery, idempotency, abuse
+   scenario and integration with prior modules. Use unit, integration (Testcontainers, real infra),
+   contract, security, migration, concurrency, property/fuzz, mutation, frontend and end-to-end
+   tests. There is no upper bound on test count when complexity justifies it.
+4. **Coverage and quality requirements.** Maintain measurable line and branch coverage reports.
+   Investigate uncovered critical code and add tests where practical. Never inflate coverage with
+   meaningless assertions or code-executing-only tests. Never delete, weaken, bypass or skip an
+   existing test to make the build pass. Never present a mocked test as an integration test. Never
+   claim defect-freedom from a coverage number.
+5. **Cumulative testing after every module.** Run the new module's unit and integration tests, all
+   previously completed modules' unit and integration tests, the complete backend regression suite,
+   affected frontend tests, and the relevant API/security/DB/e2e tests. Fix all failures, re-run,
+   then commit and push. The Identity Service integration suite (real PostgreSQL, Redis, RabbitMQ,
+   email) stays part of the cumulative suite permanently.
+6. **Continue working autonomously.** Keep going until the whole project is genuinely complete. If
+   the session is interrupted, save exact progress in `docs/development-progress.md` and this file:
+   current module, completed functionality, test results, commit hash, GitHub push status, exact
+   next task and blockers. Resume from that state; never recreate the project or repeat finished
+   work. If an external credential/provider value is unavailable, continue with unrelated work using
+   safe sandbox configuration, document the blocker, and never fabricate a real transaction.
+7. **Milestone reporting.** After each milestone report: module, functionality, unit test counts
+   (run/pass/fail/skip), integration test counts, cumulative regression results, coverage metrics
+   and uncovered areas, security/e2e results, build status, commit hash, push status and remote
+   branch, blockers, and the next module. Do not call a module complete until its functionality and
+   required tests are actually complete.
+
 ## Build commands
 
 The parent POM lists only modules that exist (the rest are commented out), so a full build works:

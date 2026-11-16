@@ -50,12 +50,26 @@ cd backend
 mvn -N install
 
 # Install the shared modules, with tests.
-for m in common-core common-web common-security common-events common-test; do
+for m in common-core common-web common-security common-events common-redis common-test; do
   mvn -f shared/$m/pom.xml install
 done
 ```
 
 Once every service module exists, a single `mvn verify` from `backend/` builds everything.
+
+### Reading a verification code during local development
+
+Verification codes are **not** written to the log by default. Registration still succeeds and the
+OTP challenge is persisted; the code is simply delivered by mail (Mailpit, on port 1025) instead of
+being printed.
+
+To read codes from the log instead, start the service with the opt-in:
+
+```bash
+CHOCO_LOG_OTP=true mvn -f services/identity-service/identity-app/pom.xml spring-boot:run
+```
+
+Do this only on a development machine. Never set it in an environment a real customer can reach.
 
 ### Running one module's tests
 

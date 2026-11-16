@@ -2,9 +2,12 @@ package com.choco.identity.application.service;
 
 import com.choco.core.error.ErrorCode;
 import com.choco.core.error.NotFoundException;
+import com.choco.identity.application.dto.AddressView;
 import com.choco.identity.application.dto.CustomerView;
 import com.choco.identity.domain.customer.Customer;
+import com.choco.identity.domain.port.AddressRepository;
 import com.choco.identity.domain.port.CustomerRepository;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -17,14 +20,21 @@ import java.util.UUID;
 public class CustomerQueryService {
 
     private final CustomerRepository customerRepository;
+    private final AddressRepository addressRepository;
 
-    public CustomerQueryService(CustomerRepository customerRepository) {
+    public CustomerQueryService(CustomerRepository customerRepository,
+                                AddressRepository addressRepository) {
         this.customerRepository = customerRepository;
+        this.addressRepository = addressRepository;
     }
 
-    /** The customer's own view of themselves. */
+    /** The customer's own view of themselves, including their saved addresses. */
     public CustomerView findOwnProfile(UUID customerId) {
-        return CustomerViews.from(require(customerId));
+        Customer customer = require(customerId);
+        List<AddressView> addresses = addressRepository.findByCustomerId(customerId).stream()
+                .map(AddressService::toView)
+                .toList();
+        return CustomerViews.withAddresses(customer, addresses);
     }
 
     /**
@@ -35,7 +45,7 @@ public class CustomerQueryService {
      * note is added later, it belongs in a separate {@code AdminCustomerView}, not in this record.
      */
     public CustomerView findForAdmin(UUID customerId) {
-        return CustomerViews.from(require(customerId));
+        return findOwnProfile(customerId);
     }
 
     private Customer require(UUID customerId) {

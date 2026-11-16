@@ -14,9 +14,12 @@ import org.springframework.stereotype.Component;
 /**
  * Delivers OTPs and account messages by email and SMS.
  *
- * <p>In development the code is logged so a developer can complete registration without a mail
- * server. That is gated on {@code choco.notifications.log-otp}, which must be false anywhere real:
- * an OTP in a log file is an OTP an operator can read, and log files are copied around freely.
+ * <p>Writing a verification code to the log lets a developer finish registration without a mail
+ * server, but it is a genuine exposure: anyone who can read the log can use the code, and logs are
+ * copied, shipped to aggregators and retained far more freely than the database. It is therefore
+ * off unless explicitly switched on, and both the shipped configuration and the fallback below
+ * default to {@code false}. The fallback matters on its own: a missing property must fail closed,
+ * so the safe value is the one that takes effect when nobody has configured anything.
  *
  * <p>SMS is behind an interface rather than a vendor SDK because no provider is selected yet. The
  * current implementation logs, and the requirement to configure a provider is recorded in the
@@ -34,12 +37,20 @@ class NotificationAdapter implements OtpDeliveryPort, AccountNotificationPort {
 
     NotificationAdapter(JavaMailSender mailSender,
                         @Value("${choco.notifications.from:noreply@choco.example}") String fromAddress,
-                        @Value("${choco.notifications.log-otp:true}") boolean logOtp,
+                        @Value("${choco.notifications.log-otp:false}") boolean logOtp,
                         SmsSender smsSender) {
         this.mailSender = mailSender;
         this.fromAddress = fromAddress;
         this.logOtp = logOtp;
         this.smsSender = smsSender;
+        if (logOtp) {
+            // Announced once at startup rather than only alongside each code, so an environment that
+            // was never meant to have this on is visible in the boot log rather than buried among
+            // per-request lines.
+            log.warn("Verification codes will be written to this log. This is a development-only "
+                    + "setting and must be off anywhere a real customer can register. "
+                    + "Unset CHOCO_LOG_OTP, or set choco.notifications.log-otp=false.");
+        }
     }
 
     @Override

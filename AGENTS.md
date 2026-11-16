@@ -112,10 +112,31 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
 15. **Rate limiting and account lockout are separate controls and must not overlap.** The lockout is
     per account and reports `ACCOUNT_LOCKED`; the limiter is a coarse backstop. If the limiter fires
     first, every locked-out customer gets the generic 429 and the actionable message is unreachable.
+16. **`spring-boot:run` resolves sibling modules from the local Maven repo, not the working tree.**
+    After changing `identity-adapters-out` (or any module the app depends on), run
+    `mvn -DskipTests install -pl <module>` first, or the app boots against a stale jar and your change
+    appears to have no effect.
+17. **`ddl-auto: validate` is the check that catches a schema/entity drift.** A new JPA entity whose
+    columns do not exactly match its Flyway migration makes the app fail to start; it does not warn.
+    The fastest loop is to boot the service against the compose Postgres after adding a migration.
+18. **"At most one default per customer" needs a partial unique index, not a plain one.** A unique
+    index on `(customer_id, is_default)` would forbid a second *non-default* address, because every
+    such row has `is_default = false`. `CREATE UNIQUE INDEX ... ON t (customer_id) WHERE is_default`
+    is the only correct expression, and it is what stops two concurrent "make default" requests from
+    both succeeding.
+19. **Ownership scoping belongs in the repository method, not in a caller-side check.** Address reads
+    go through `findByIdAndCustomerId`; there is deliberately no unscoped `findById`. The service also
+    reports a cross-customer access as `404` rather than `403`, so the response does not confirm that
+    another customer's id exists. Five tests fail if the `customer_id` predicate is dropped from the
+    query, which is how that rule is kept honest.
+20. **A multi-field domain `update` must validate into locals before assigning.** Assigning fields one
+    at a time leaves the aggregate half-updated when a later field is rejected; the caller sees an
+    exception, but the in-memory object has already changed and a subsequent save would persist a mix
+    of old and new values. `Address.update` validates everything first, and a test pins it.
 
 ## Test tally
 
-`mvn verify` at `backend/`: **167 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **216 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -125,14 +146,17 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | common-security | 23 |
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
-| identity-domain | 26 |
-| identity-application | 56 |
+| identity-domain | 39 |
+| identity-application | 84 |
+| identity-adapters-out | 6 |
 | identity-adapters-in | 1 |
-| identity-app (architecture) | 4 |
-| **total** | **167** |
+| identity-app | 6 |
+| **total** | **216** |
 
 ## Local dev services
 
 Redis, RabbitMQ and SMTP are needed for identity-service to report `UP`. RabbitMQ credentials come
 from compose (`choco` / `choco_rabbit_pw`). A dev SMTP sink on port 1025 is enough for OTPs; there is
-no provider selected for SMS yet, so codes are logged while `choco.notifications.log-otp=true`.
+no provider selected for SMS yet, so codes are written to the log only while `CHOCO_LOG_OTP=true`
+(equivalently `choco.notifications.log-otp`). The default is `false` in both the shipped config and
+the `@Value` fallback, so a missing property fails closed; enabling it logs a startup warning.

@@ -142,7 +142,20 @@ class IdentityApplicationConfiguration {
 
     @Bean
     com.choco.identity.application.service.CustomerQueryService customerQueryService(
-            CustomerRepository customerRepository) {
-        return new com.choco.identity.application.service.CustomerQueryService(customerRepository);
+            CustomerRepository customerRepository,
+            com.choco.identity.domain.port.AddressRepository addressRepository) {
+        return new com.choco.identity.application.service.CustomerQueryService(customerRepository,
+                addressRepository);
+    }
+
+    @Bean
+    com.choco.identity.application.service.AddressService addressService(
+            com.choco.identity.domain.port.AddressRepository addressRepository,
+            AuditLogPort auditLog,
+            TransactionRunner transactionRunner,
+            IdGenerator idGenerator,
+            Clock clock) {
+        return new com.choco.identity.application.service.AddressService(addressRepository, auditLog,
+                transactionRunner, idGenerator, clock);
     }
 }

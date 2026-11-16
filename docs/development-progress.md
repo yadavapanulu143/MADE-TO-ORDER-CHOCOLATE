@@ -3,10 +3,12 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 167 tests, 0 failures, 0 errors. Integration tests
+**Last verified:** `mvn verify` in `backend/` — 216 tests, 0 failures, 0 errors. Integration tests
 (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container, and the
 identity service was started and its endpoints driven over HTTP to confirm the behaviour end to end.
+Address management was verified the same way: 21 HTTP checks covering ownership isolation, validation
+and default handling, against the real PostgreSQL schema with Flyway applied.
 
 ---
 
@@ -57,18 +59,19 @@ identity service was started and its endpoints driven over HTTP to confirm the b
 | 3.8 | Admin authentication | TODO | No admin login endpoint; admin is a role on the customer token, and no admin account is seeded |
 | 3.9 | Role-based authorization | DONE | `role`/`permissions` JWT claims → authorities; `@EnableMethodSecurity` |
 | 3.10 | Login rate limiting / brute-force protection | DONE | `AbuseGuard` + `RedisRateLimiter`; 10 unit tests + 4 integration tests + verified over HTTP |
+| 3.11 | Verification codes never logged in production | DONE | `CHOCO_LOG_OTP` defaults to `false` in both the shipped config and the fail-closed `@Value` fallback; a loud startup WARN fires when it is enabled. `NotificationAdapterOtpLoggingTest` (6) + `OtpLoggingDefaultTest` (2), both confirmed to fail on a regression. Verified at runtime: 0 codes logged by default, 2 when opted in |
 
 ## Phase 4 — Customer and product management
 
-| # | Requirement | Status |
-|---|---|---|
-| 4.1 | Customer profile view/update | IN PROGRESS |
-| 4.2 | Delivery address management | TODO |
-| 4.3 | Verification status display | DONE |
-| 4.4 | Product catalogue (multi-product ready) | TODO |
-| 4.5 | Product images | TODO |
-| 4.6 | Pricing + variants/sizes | TODO |
-| 4.7 | Admin product management | TODO |
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 4.1 | Customer profile view/update | IN PROGRESS | View + addresses DONE; profile **update** endpoint still TODO |
+| 4.2 | Delivery address management | DONE | `AddressController` (CRUD + default); `AddressTest` (13) + `AddressServiceTest` (25); `V2__customer_addresses.sql`; one-default-per-customer enforced by a partial unique index and verified in PostgreSQL; ownership isolation verified over HTTP (21 checks) |
+| 4.3 | Verification status display | DONE | `CustomerView` carries `emailVerified`/`mobileVerified`/`fullyVerified` |
+| 4.4 | Product catalogue (multi-product ready) | TODO | |
+| 4.5 | Product images | TODO | |
+| 4.6 | Pricing + variants/sizes | TODO | |
+| 4.7 | Admin product management | TODO | |
 
 ## Phase 5 — Shopping and orders
 
@@ -198,8 +201,14 @@ identity service was started and its endpoints driven over HTTP to confirm the b
 
 | Module | Tests | Status |
 |---|---|---|
-| common-core | 26 | green |
+| common-core | 40 | green |
 | common-web | 7 | green |
 | common-security | 23 | green |
 | common-events | 6 | green |
-| **Total** | **62** | **green** |
+| common-redis | 4 (integration) | green |
+| identity-domain | 39 | green |
+| identity-application | 84 | green |
+| identity-adapters-out | 6 | green |
+| identity-adapters-in | 1 | green |
+| identity-app | 6 | green |
+| **Total** | **216** | **green** |

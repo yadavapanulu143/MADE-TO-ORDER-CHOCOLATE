@@ -20,11 +20,20 @@ public class SnapshottingTransactionRunner implements TransactionRunner {
 
     private final InMemoryCustomerRepository customers;
     private final InMemoryOtpChallengeRepository challenges;
+    private final InMemoryAddressRepository addresses;
 
     public SnapshottingTransactionRunner(InMemoryCustomerRepository customers,
                                          InMemoryOtpChallengeRepository challenges) {
+        this(customers, challenges, null);
+    }
+
+    /** Address-aware variant, for tests that write addresses inside a unit of work. */
+    public SnapshottingTransactionRunner(InMemoryCustomerRepository customers,
+                                         InMemoryOtpChallengeRepository challenges,
+                                         InMemoryAddressRepository addresses) {
         this.customers = customers;
         this.challenges = challenges;
+        this.addresses = addresses;
     }
 
     @Override
@@ -43,11 +52,15 @@ public class SnapshottingTransactionRunner implements TransactionRunner {
     private <T> T run(Supplier<T> work) {
         var customerSnapshot = customers.snapshot();
         var challengeSnapshot = challenges.snapshot();
+        var addressSnapshot = addresses == null ? null : addresses.snapshot();
         try {
             return work.get();
         } catch (RuntimeException e) {
             customers.restore(customerSnapshot);
             challenges.restore(challengeSnapshot);
+            if (addresses != null) {
+                addresses.restore(addressSnapshot);
+            }
             throw e;
         }
     }

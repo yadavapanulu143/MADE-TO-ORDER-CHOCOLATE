@@ -1,5 +1,8 @@
 package com.choco.identity.adapter.out.persistence;
 
+import com.choco.core.domain.PhoneNumber;
+import com.choco.core.domain.Pincode;
+import com.choco.identity.domain.address.Address;
 import com.choco.identity.domain.customer.ContactDetails;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
@@ -65,6 +68,32 @@ final class PersistenceMapper {
         return OtpChallenge.rehydrate(entity.getId(), entity.getCustomerId(), entity.getChannel(),
                 entity.getDestination(), entity.getCodeHash(), entity.getCreatedAt(), entity.getExpiresAt(),
                 entity.getAttempts(), entity.getResendCount(), entity.getConsumedAt());
+    }
+
+    static AddressJpaEntity toEntity(Address address) {
+        AddressJpaEntity entity = new AddressJpaEntity();
+        entity.setId(address.id());
+        entity.setCustomerId(address.customerId());
+        entity.setRecipientName(address.recipientName());
+        entity.setMobile(address.mobile().value());
+        entity.setLine1(address.line1());
+        entity.setLine2(address.line2());
+        entity.setCity(address.city());
+        entity.setState(address.state());
+        entity.setPincode(address.pincode().value());
+        entity.setDeliveryInstructions(address.deliveryInstructions());
+        entity.setDefault(address.isDefault());
+        entity.setCreatedAt(address.createdAt());
+        entity.setUpdatedAt(address.updatedAt());
+        return entity;
+    }
+
+    static Address toDomain(AddressJpaEntity entity) {
+        return Address.rehydrate(entity.getId(), entity.getCustomerId(), entity.getRecipientName(),
+                PhoneNumber.of(entity.getMobile()), entity.getLine1(), entity.getLine2(),
+                entity.getCity(), entity.getState(), Pincode.of(entity.getPincode()),
+                entity.getDeliveryInstructions(), entity.isDefault(), entity.getCreatedAt(),
+                entity.getUpdatedAt());
     }
 
     private static Set<String> channelNames(Customer customer) {

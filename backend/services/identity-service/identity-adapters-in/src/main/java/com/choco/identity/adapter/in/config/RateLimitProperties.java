@@ -34,6 +34,9 @@ public class RateLimitProperties {
     private int passwordResetsPerIp = AbuseGuard.Policy.defaults().passwordResetsPerIp();
     private Duration passwordResetWindow = AbuseGuard.Policy.defaults().passwordResetWindow();
 
+    private int passwordChangesPerCustomer = AbuseGuard.Policy.defaults().passwordChangesPerCustomer();
+    private Duration passwordChangeWindow = AbuseGuard.Policy.defaults().passwordChangeWindow();
+
     private int registrationsPerIp = AbuseGuard.Policy.defaults().registrationsPerIp();
     private Duration registrationWindow = AbuseGuard.Policy.defaults().registrationWindow();
 
@@ -44,6 +47,7 @@ public class RateLimitProperties {
                 otpVerificationsPerCustomer, otpWindow,
                 otpResendsPerCustomer, otpResendWindow,
                 passwordResetsPerIdentifier, passwordResetsPerIp, passwordResetWindow,
+                passwordChangesPerCustomer, passwordChangeWindow,
                 registrationsPerIp, registrationWindow);
     }
 
@@ -125,6 +129,22 @@ public class RateLimitProperties {
 
     public void setPasswordResetWindow(Duration passwordResetWindow) {
         this.passwordResetWindow = passwordResetWindow;
+    }
+
+    public int getPasswordChangesPerCustomer() {
+        return passwordChangesPerCustomer;
+    }
+
+    public void setPasswordChangesPerCustomer(int passwordChangesPerCustomer) {
+        this.passwordChangesPerCustomer = passwordChangesPerCustomer;
+    }
+
+    public Duration getPasswordChangeWindow() {
+        return passwordChangeWindow;
+    }
+
+    public void setPasswordChangeWindow(Duration passwordChangeWindow) {
+        this.passwordChangeWindow = passwordChangeWindow;
     }
 
     public int getRegistrationsPerIp() {

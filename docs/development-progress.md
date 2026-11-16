@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 240 tests, 0 failures, 0 errors. Integration tests
+**Last verified:** `mvn verify` in `backend/` — 248 tests, 0 failures, 0 errors. Integration tests
 (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container, and the
 identity service was started and its endpoints driven over HTTP to confirm the behaviour end to end.
@@ -68,10 +68,11 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | 4.1 | Customer profile view/update | DONE | `GET /me`, `PUT /me` (name), `PATCH /me/contact` (email/mobile, re-verifies the changed channel); `ProfileServiceTest` (20); verified over HTTP (22 checks) |
 | 4.2 | Delivery address management | DONE | `AddressController` (CRUD + default); `AddressTest` (13) + `AddressServiceTest` (25); `V2__customer_addresses.sql`; one-default-per-customer enforced by a partial unique index and verified in PostgreSQL; ownership isolation verified over HTTP (21 checks) |
 | 4.3 | Verification status display | DONE | `CustomerView` carries `emailVerified`/`mobileVerified`/`fullyVerified` |
-| 4.4 | Product catalogue (multi-product ready) | TODO | |
-| 4.5 | Product images | TODO | |
-| 4.6 | Pricing + variants/sizes | TODO | |
-| 4.7 | Admin product management | TODO | |
+| 4.4 | Password change from profile | DONE | `POST /me/password`; requires the current password, applies the shared password policy, rejects reuse, revokes every refresh token; `PasswordChangeServiceTest` (12); verified over HTTP (10 checks) |
+| 4.5 | Product catalogue (multi-product ready) | TODO | |
+| 4.6 | Product images | TODO | |
+| 4.7 | Pricing + variants/sizes | TODO | |
+| 4.8 | Admin product management | TODO | |
 
 ## Phase 5 — Shopping and orders
 
@@ -211,4 +212,4 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | identity-adapters-out | 6 | green |
 | identity-adapters-in | 1 | green |
 | identity-app | 6 | green |
-| **Total** | **240** | **green** |
+| **Total** | **248** | **green** |

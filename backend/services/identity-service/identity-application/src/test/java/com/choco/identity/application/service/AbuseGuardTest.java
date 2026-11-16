@@ -162,6 +162,7 @@ class AbuseGuardTest {
                 2, Duration.ofMinutes(1),
                 2, Duration.ofMinutes(1),
                 2, 2, Duration.ofMinutes(1),
+                2, Duration.ofMinutes(1),
                 2, Duration.ofMinutes(1)));
 
         strict.checkLogin(IDENTIFIER, IP);

@@ -1,9 +1,11 @@
 package com.choco.identity.adapter.in.web;
 
 import com.choco.identity.application.command.ChangeContactCommand;
+import com.choco.identity.application.command.ChangePasswordCommand;
 import com.choco.identity.application.command.UpdateProfileCommand;
 import com.choco.identity.application.dto.CustomerView;
 import com.choco.identity.application.service.CustomerQueryService;
+import com.choco.identity.application.service.PasswordChangeService;
 import com.choco.identity.application.service.ProfileService;
 import com.choco.security.principal.AuthenticatedUser;
 import com.choco.security.principal.CurrentUserProvider;
@@ -15,6 +17,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,13 +41,16 @@ class CustomerController {
 
     private final CustomerQueryService customerQueryService;
     private final ProfileService profileService;
+    private final PasswordChangeService passwordChangeService;
     private final CurrentUserProvider currentUserProvider;
 
     CustomerController(CustomerQueryService customerQueryService,
                        ProfileService profileService,
+                       PasswordChangeService passwordChangeService,
                        CurrentUserProvider currentUserProvider) {
         this.customerQueryService = customerQueryService;
         this.profileService = profileService;
+        this.passwordChangeService = passwordChangeService;
         this.currentUserProvider = currentUserProvider;
     }
 
@@ -86,5 +92,22 @@ class CustomerController {
         AuthenticatedUser caller = currentUserProvider.requireUser();
         return ResponseEntity.ok(profileService.changeContact(caller.userId(),
                 new ChangeContactCommand(request.email(), request.mobile())));
+    }
+
+    /**
+     * Changes the password and ends every other session.
+     *
+     * <p>Returns {@code 204} rather than the profile: the operation has no new representation to
+     * hand back, and echoing the account would invite a client to treat the response as proof of
+     * anything. The current password is required in the body, so a borrowed session alone is not
+     * enough to take the account over.
+     */
+    @PostMapping("/me/password")
+    @Operation(summary = "Change the signed-in customer's password")
+    ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        AuthenticatedUser caller = currentUserProvider.requireUser();
+        passwordChangeService.changePassword(caller.userId(),
+                new ChangePasswordCommand(request.currentPassword(), request.newPassword()));
+        return ResponseEntity.noContent().build();
     }
 }

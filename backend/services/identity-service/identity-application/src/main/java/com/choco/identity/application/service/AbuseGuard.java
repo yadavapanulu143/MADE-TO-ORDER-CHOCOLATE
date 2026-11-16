@@ -45,6 +45,8 @@ public class AbuseGuard {
                          int passwordResetsPerIdentifier,
                          int passwordResetsPerIp,
                          Duration passwordResetWindow,
+                         int passwordChangesPerCustomer,
+                         Duration passwordChangeWindow,
                          int registrationsPerIp,
                          Duration registrationWindow) {
 
@@ -72,6 +74,7 @@ public class AbuseGuard {
                     10, Duration.ofMinutes(15),
                     5, Duration.ofMinutes(15),
                     3, 10, Duration.ofMinutes(15),
+                    5, Duration.ofMinutes(15),
                     10, Duration.ofHours(1));
         }
     }
@@ -82,6 +85,7 @@ public class AbuseGuard {
     private static final String OTP_RESEND = "rl:otp:resend:";
     private static final String RESET_IDENTIFIER = "rl:reset:id:";
     private static final String RESET_IP = "rl:reset:ip:";
+    private static final String PASSWORD_CHANGE = "rl:pwdchange:id:";
     private static final String REGISTER_IP = "rl:register:ip:";
 
     private final RateLimiter rateLimiter;
@@ -137,6 +141,20 @@ public class AbuseGuard {
                 "Too many password reset requests. Please wait before requesting another.");
         consumeIfKnown(RESET_IP + ipAddress, policy.passwordResetsPerIp(), policy.passwordResetWindow(),
                 "Too many password reset requests from this network. Please wait and try again.");
+    }
+
+    /**
+     * Limits how often a signed-in customer may attempt a password change.
+     *
+     * <p>The current-password field is a second place an attacker can guess a password, so it needs
+     * its own limiter rather than relying on the sign-in one, which is only consumed at login. A
+     * per-customer key is the right scope: the caller is already authenticated, so the account is
+     * known and the counter cannot be evaded by rotating addresses.
+     */
+    public void checkPasswordChange(String customerId) {
+        consume(PASSWORD_CHANGE + hash(customerId), policy.passwordChangesPerCustomer(),
+                policy.passwordChangeWindow(),
+                "Too many password change attempts. Please wait and try again.");
     }
 
     /** Limits account creation per source address, so the signup form cannot be used as a mail relay. */

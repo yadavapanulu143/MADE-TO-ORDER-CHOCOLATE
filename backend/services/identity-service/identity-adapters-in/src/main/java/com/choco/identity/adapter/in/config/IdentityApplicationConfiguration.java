@@ -174,4 +174,20 @@ class IdentityApplicationConfiguration {
                 otpChallengeRepository, otpCodeService, otpDelivery, auditLog, eventPublisher,
                 transactionRunner, idGenerator, clock);
     }
+
+    @Bean
+    com.choco.identity.application.service.PasswordChangeService passwordChangeService(
+            CustomerRepository customerRepository,
+            PasswordHasher passwordHasher,
+            PasswordPolicy passwordPolicy,
+            AccountNotificationPort notifications,
+            AuditLogPort auditLog,
+            AuthenticationService authenticationService,
+            AbuseGuard abuseGuard,
+            TransactionRunner transactionRunner,
+            Clock clock) {
+        return new com.choco.identity.application.service.PasswordChangeService(customerRepository,
+                passwordHasher, passwordPolicy, notifications, auditLog, authenticationService,
+                abuseGuard, transactionRunner, clock);
+    }
 }

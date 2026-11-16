@@ -133,10 +133,19 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     at a time leaves the aggregate half-updated when a later field is rejected; the caller sees an
     exception, but the in-memory object has already changed and a subsequent save would persist a mix
     of old and new values. `Address.update` validates everything first, and a test pins it.
+21. **`AbuseGuard.Policy` is a positional record; adding a field breaks every call site.** There are
+    three: `defaults()`, `RateLimitProperties.toPolicy()` (plus its field initialisers) and the strict
+    policy in `AbuseGuardTest`. Add the new pair in the same position in all three, or the build fails
+    with an argument-count error rather than anything explanatory.
+22. **A contact change is a security event, not a field edit.** `Customer.changeEmail` /
+    `changeMobile` clear that channel's verified flag, because the new address has not been proven.
+    Without the clear, a customer could move an account onto an address they do not control and keep
+    the "verified" badge — receiving password-reset mail for a mailbox that is not theirs. A code is
+    then issued to the *new* destination, not the old one. Two tests fail if the flag is left set.
 
 ## Test tally
 
-`mvn verify` at `backend/`: **240 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **248 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -147,11 +156,11 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
 | identity-domain | 44 |
-| identity-application | 101 |
+| identity-application | 111 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 1 |
 | identity-app | 6 |
-| **total** | **240** |
+| **total** | **248** |
 
 ## Local dev services
 

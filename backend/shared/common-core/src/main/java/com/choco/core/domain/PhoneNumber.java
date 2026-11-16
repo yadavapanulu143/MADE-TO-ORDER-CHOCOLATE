@@ -26,6 +26,15 @@ public record PhoneNumber(String value) {
         return new PhoneNumber(value);
     }
 
+    /** Parses without throwing; see {@link EmailAddress#tryParse(String)} for the rationale. */
+    public static java.util.Optional<PhoneNumber> tryParse(String value) {
+        try {
+            return java.util.Optional.of(new PhoneNumber(value));
+        } catch (IllegalArgumentException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     public String withCountryCode() {
         return "+91" + value;
     }

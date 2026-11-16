@@ -16,8 +16,16 @@ public class ValidationException extends DomainException {
         this(message, Map.of());
     }
 
+    public ValidationException(ErrorCode errorCode, String message) {
+        this(errorCode, message, Map.of());
+    }
+
     public ValidationException(String message, Map<String, String> fieldErrors) {
-        super(ErrorCode.VALIDATION_FAILED, message);
+        this(ErrorCode.VALIDATION_FAILED, message, fieldErrors);
+    }
+
+    public ValidationException(ErrorCode errorCode, String message, Map<String, String> fieldErrors) {
+        super(errorCode, message);
         this.fieldErrors = Collections.unmodifiableMap(new LinkedHashMap<>(fieldErrors));
     }
 

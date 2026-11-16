@@ -6,6 +6,10 @@ public class NotFoundException extends DomainException {
         super(ErrorCode.NOT_FOUND, message);
     }
 
+    public NotFoundException(ErrorCode errorCode, String message) {
+        super(errorCode, message);
+    }
+
     public static NotFoundException of(String entity, Object id) {
         return new NotFoundException(entity + " not found: " + id);
     }

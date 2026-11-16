@@ -28,6 +28,21 @@ public record EmailAddress(String value) {
         return new EmailAddress(value);
     }
 
+    /**
+     * Parses without throwing.
+     *
+     * <p>Used where a caller supplies either an email or a mobile number and the input simply has to
+     * be classified: a malformed value must not raise here, because the caller's job is to decide
+     * which lookup to attempt, and the eventual "not found" answer covers both cases.
+     */
+    public static java.util.Optional<EmailAddress> tryParse(String value) {
+        try {
+            return java.util.Optional.of(new EmailAddress(value));
+        } catch (IllegalArgumentException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     @Override
     public String toString() {
         return value;

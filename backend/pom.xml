@@ -154,6 +154,28 @@
         <artifactId>common-test</artifactId>
         <version>${project.version}</version>
       </dependency>
+
+      <!-- Identity service layers -->
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>identity-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>identity-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>identity-adapters-out</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>identity-adapters-in</artifactId>
+        <version>${project.version}</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 

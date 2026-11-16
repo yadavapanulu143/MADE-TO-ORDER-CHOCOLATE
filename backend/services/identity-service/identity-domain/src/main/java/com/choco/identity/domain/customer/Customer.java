@@ -1,6 +1,8 @@
 package com.choco.identity.domain.customer;
 
 import com.choco.core.domain.AggregateRoot;
+import com.choco.core.domain.EmailAddress;
+import com.choco.core.domain.PhoneNumber;
 import com.choco.core.error.BusinessRuleException;
 import com.choco.core.error.ErrorCode;
 import com.choco.identity.domain.event.CustomerPasswordChanged;
@@ -28,7 +30,7 @@ public class Customer extends AggregateRoot {
     private static final int LOCK_DURATION_MINUTES = 15;
 
     private final UUID id;
-    private final ContactDetails contact;
+    private ContactDetails contact;
     private String passwordHash;
     private final Set<VerificationChannel> verifiedChannels;
     private final Instant registeredAt;
@@ -93,6 +95,39 @@ public class Customer extends AggregateRoot {
         this.failedLoginAttempts = 0;
         this.lockedUntil = null;
         registerEvent(new CustomerPasswordChanged(id, now, id.toString()));
+    }
+
+    /**
+     * Changes the account's full name.
+     *
+     * <p>Only the name. The email and mobile are the account's identity and each carries its own
+     * verified flag, so they are changed through {@link #changeEmail} and {@link #changeMobile},
+     * which can revoke that verification.
+     */
+    public void changeFullName(String fullName, Instant now) {
+        this.contact = new ContactDetails(contact.email(), contact.mobile(), fullName);
+        this.updatedAt = now;
+    }
+
+    /**
+     * Changes the email address and clears the email verification.
+     *
+     * <p>Clearing the flag is the whole point: the new address has not been proven to belong to this
+     * customer, and leaving the old {@code EMAIL} verification in place would mark an unverified
+     * address as verified. The account therefore stops being {@link #fullyVerified()} until the new
+     * address is confirmed.
+     */
+    public void changeEmail(EmailAddress email, Instant now) {
+        this.contact = new ContactDetails(email, contact.mobile(), contact.fullName());
+        this.verifiedChannels.remove(VerificationChannel.EMAIL);
+        this.updatedAt = now;
+    }
+
+    /** Changes the mobile number and clears the mobile verification; see {@link #changeEmail}. */
+    public void changeMobile(PhoneNumber mobile, Instant now) {
+        this.contact = new ContactDetails(contact.email(), mobile, contact.fullName());
+        this.verifiedChannels.remove(VerificationChannel.MOBILE);
+        this.updatedAt = now;
     }
 
     /** Records a failed login and locks the account once the threshold is reached. */

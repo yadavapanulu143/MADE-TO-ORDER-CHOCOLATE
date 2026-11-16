@@ -136,7 +136,7 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
 
 ## Test tally
 
-`mvn verify` at `backend/`: **216 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **240 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -146,12 +146,12 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | common-security | 23 |
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
-| identity-domain | 39 |
-| identity-application | 84 |
+| identity-domain | 44 |
+| identity-application | 101 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 1 |
 | identity-app | 6 |
-| **total** | **216** |
+| **total** | **240** |
 
 ## Local dev services
 

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.choco.core.domain.DomainEvent;
+import com.choco.core.domain.EmailAddress;
+import com.choco.core.domain.PhoneNumber;
 import com.choco.core.error.BusinessRuleException;
 import com.choco.core.error.ErrorCode;
 import java.time.Instant;
@@ -194,5 +196,69 @@ class CustomerTest {
         assertThat(CONTACT.maskedEmail()).isEqualTo("a***a@example.com");
         assertThat(CONTACT.maskedMobile()).isEqualTo("******3210");
         assertThat(CONTACT.maskedEmail()).doesNotContain("asha@");
+    }
+
+    @Test
+    void changing_the_full_name_keeps_verification() {
+        Customer customer = newCustomer();
+        customer.verify(VerificationChannel.EMAIL, NOW);
+        customer.verify(VerificationChannel.MOBILE, NOW);
+
+        customer.changeFullName("Asha R Menon", NOW);
+
+        assertThat(customer.contact().fullName()).isEqualTo("Asha R Menon");
+        assertThat(customer.fullyVerified())
+                .as("a display-name change must not disturb verification")
+                .isTrue();
+    }
+
+    @Test
+    void changing_the_email_clears_email_verification_only() {
+        Customer customer = newCustomer();
+        customer.verify(VerificationChannel.EMAIL, NOW);
+        customer.verify(VerificationChannel.MOBILE, NOW);
+
+        customer.changeEmail(EmailAddress.of("new@example.com"), NOW);
+
+        assertThat(customer.contact().email().value()).isEqualTo("new@example.com");
+        assertThat(customer.isVerified(VerificationChannel.EMAIL))
+                .as("the new address has not been proven")
+                .isFalse();
+        assertThat(customer.isVerified(VerificationChannel.MOBILE))
+                .as("changing the email must not touch the mobile channel")
+                .isTrue();
+        assertThat(customer.fullyVerified()).isFalse();
+    }
+
+    @Test
+    void changing_the_mobile_clears_mobile_verification_only() {
+        Customer customer = newCustomer();
+        customer.verify(VerificationChannel.EMAIL, NOW);
+        customer.verify(VerificationChannel.MOBILE, NOW);
+
+        customer.changeMobile(PhoneNumber.of("9123456780"), NOW);
+
+        assertThat(customer.contact().mobile().value()).isEqualTo("9123456780");
+        assertThat(customer.isVerified(VerificationChannel.MOBILE)).isFalse();
+        assertThat(customer.isVerified(VerificationChannel.EMAIL)).isTrue();
+    }
+
+    @Test
+    void changing_the_email_keeps_the_password_hash() {
+        Customer customer = newCustomer();
+        customer.changeEmail(EmailAddress.of("new@example.com"), NOW);
+
+        assertThat(customer.passwordHash())
+                .as("a contact change must never reset credentials")
+                .isEqualTo("$argon2id$hash");
+    }
+
+    @Test
+    void changing_the_full_name_rejects_a_blank_value() {
+        Customer customer = newCustomer();
+
+        assertThatThrownBy(() -> customer.changeFullName("  ", NOW))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Full name");
     }
 }

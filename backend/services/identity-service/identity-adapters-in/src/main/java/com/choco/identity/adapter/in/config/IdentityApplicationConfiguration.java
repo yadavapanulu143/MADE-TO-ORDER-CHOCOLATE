@@ -158,4 +158,20 @@ class IdentityApplicationConfiguration {
         return new com.choco.identity.application.service.AddressService(addressRepository, auditLog,
                 transactionRunner, idGenerator, clock);
     }
+
+    @Bean
+    com.choco.identity.application.service.ProfileService profileService(
+            CustomerRepository customerRepository,
+            OtpChallengeRepository otpChallengeRepository,
+            OtpCodeService otpCodeService,
+            OtpDeliveryPort otpDelivery,
+            AuditLogPort auditLog,
+            EventPublisher eventPublisher,
+            TransactionRunner transactionRunner,
+            IdGenerator idGenerator,
+            Clock clock) {
+        return new com.choco.identity.application.service.ProfileService(customerRepository,
+                otpChallengeRepository, otpCodeService, otpDelivery, auditLog, eventPublisher,
+                transactionRunner, idGenerator, clock);
+    }
 }

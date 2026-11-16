@@ -3,12 +3,14 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 282 tests, 0 failures, 0 errors. Integration tests
+**Last verified:** `mvn verify` in `backend/` — 316 tests, 0 failures, 0 errors. Integration tests
 (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
-The Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container, and the
-identity service was started and its endpoints driven over HTTP to confirm the behaviour end to end.
-Address management was verified the same way: 21 HTTP checks covering ownership isolation, validation
-and default handling, against the real PostgreSQL schema with Flyway applied.
+The identity service now has full-stack integration tests that start real PostgreSQL, Redis and
+RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
+schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
+including OTP verification and token rotation (`CustomerJourneyIT`), administrator authentication and
+the customer/admin boundary (`AdminJourneyIT`), and outbox-to-broker delivery (`OutboxRelayIT`). The
+Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container.
 
 ---
 
@@ -155,8 +157,8 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (62 green so far) |
-| 11.2 | Integration tests (Testcontainers) | TODO |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (282 green so far) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (identity service: real PostgreSQL, Redis, RabbitMQ, SMTP; 34 green) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | TODO |
 | 11.5 | Payment verification test | TODO |
@@ -211,5 +213,14 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | identity-application | 132 | green |
 | identity-adapters-out | 6 | green |
 | identity-adapters-in | 6 | green |
-| identity-app | 6 | green |
-| **Total** | **282** | **green** |
+| identity-app | 40 (6 unit + 34 integration) | green |
+| **Total** | **316** | **green** |
+
+### Identity integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 7 | Flyway applied V1–V3; Hibernate `validate` matches the schema; DB-level unique, check and FK constraints reject bad rows |
+| CustomerJourneyIT | 14 | Register → verify email and mobile → sign in → profile/contact/addresses, refresh rotation and replay detection, logout, login rate limiting, ownership isolation |
+| AdminJourneyIT | 10 | Bootstrap administrator, admin token authority, no public admin sign-up, customer credentials and refresh tokens refused at admin endpoints, independent admin rate limiting |
+| OutboxRelayIT | 3 | A real registration publishes `customer.registered` to a bound RabbitMQ queue and marks the outbox row published |

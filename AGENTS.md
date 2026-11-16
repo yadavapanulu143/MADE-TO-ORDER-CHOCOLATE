@@ -159,9 +159,19 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     mean a flood of customer sign-ins from a shared NAT could throttle the seller out of their own
     dashboard, and an attack on the dashboard could lock customers out of the storefront.
 
+25. **The integration tests run against real containers, not mocks, on purpose.** A mock proves a
+    call happened; it cannot prove a migration matches its entity, that a `CHECK` constraint fires,
+    that a Lua rate limiter is atomic, or that an event actually reaches RabbitMQ. Those are the
+    failures that pass every unit test and break production, so `AbstractIdentityIntegrationTest`
+    starts real PostgreSQL, Redis and RabbitMQ and reads OTPs from a real SMTP sink. Two seams are
+    deliberate and worth remembering: the SMTP sink is on a **fixed port (3025)** because GreenMail
+    restarts per class while the Spring context is cached (a random port sends the second class to a
+    dead sink), and the base class **reserves a free HTTP port** so `server.port` and
+    `choco.security.jwk-set-uri` agree and tokens are verified through the real JWKS fetch.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **282 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **316 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -175,8 +185,35 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | identity-application | 132 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
-| identity-app | 6 |
-| **total** | **282** |
+| identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
+| **total** | **316** |
+
+### Integration tests (`*IT`, run by `mvn verify`)
+
+`identity-app` carries the full-stack tests under `src/test/java/com/choco/identity/it`. They start
+real containers (`AbstractIdentityIntegrationTest`): PostgreSQL, Redis and RabbitMQ, plus a GreenMail
+SMTP sink, and drive the service over HTTP on a reserved port. They exist to catch what unit tests
+cannot — a migration that disagrees with its entity, a constraint the application layer does not
+know about, a rate limiter that is not atomic, an event that never leaves the outbox.
+
+- `SchemaAndPersistenceIT` — Flyway applied every migration, Hibernate `validate` passes, and the
+  database-level unique, check and foreign-key constraints reject what the application layer would
+  have caught only in a race.
+- `CustomerJourneyIT` — register → verify email and mobile (codes read from the SMTP sink) → sign in
+  → profile, contact change, addresses, refresh rotation, logout, rate limiting, ownership.
+- `AdminJourneyIT` — the bootstrap administrator, admin token authority, and the boundary proving a
+  customer credential and a customer refresh token are both refused at the admin endpoints.
+- `OutboxRelayIT` — a real registration ends with `customer.registered` in a bound RabbitMQ queue
+  and its outbox row marked published.
+
+Two things these tests depend on, both deliberate:
+
+- **The SMTP sink uses a fixed port (3025).** GreenMail restarts between classes while the Spring
+  context is cached, so a random port would leave the second class sending to the first class's dead
+  sink. The port must be free when the suite runs.
+- **The access-token decoder fetches the service's own JWKS** over HTTP, so the base class reserves a
+  free port up front and points both `server.port` and `choco.security.jwk-set-uri` at it. A token
+  minted by the service is then verified by the same real decoder path production uses.
 
 ## Local dev services
 

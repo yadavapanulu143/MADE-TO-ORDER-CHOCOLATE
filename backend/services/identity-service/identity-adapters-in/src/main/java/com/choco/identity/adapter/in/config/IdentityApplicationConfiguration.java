@@ -8,6 +8,7 @@ import com.choco.core.port.PasswordPolicy;
 import com.choco.core.port.RateLimiter;
 import com.choco.core.port.TransactionRunner;
 import com.choco.identity.application.port.AccountNotificationPort;
+import com.choco.identity.application.port.AdminRefreshTokenRepository;
 import com.choco.identity.application.port.AuditLogPort;
 import com.choco.identity.application.port.OpaqueTokenHasher;
 import com.choco.identity.application.port.OtpDeliveryPort;
@@ -20,6 +21,7 @@ import com.choco.identity.application.service.PasswordResetService;
 import com.choco.identity.application.service.RegistrationService;
 import com.choco.identity.application.service.VerificationService;
 import com.choco.identity.domain.port.CustomerRepository;
+import com.choco.identity.domain.port.AdminRepository;
 import com.choco.identity.domain.port.OtpChallengeRepository;
 import com.choco.identity.domain.port.OtpCodeService;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -189,5 +191,33 @@ class IdentityApplicationConfiguration {
         return new com.choco.identity.application.service.PasswordChangeService(customerRepository,
                 passwordHasher, passwordPolicy, notifications, auditLog, authenticationService,
                 abuseGuard, transactionRunner, clock);
+    }
+
+    @Bean
+    com.choco.identity.application.service.AdminAuthenticationService adminAuthenticationService(
+            AdminRepository adminRepository,
+            AdminRefreshTokenRepository adminRefreshTokenRepository,
+            PasswordHasher passwordHasher,
+            TokenService tokenService,
+            AuditLogPort auditLog,
+            AbuseGuard abuseGuard,
+            TransactionRunner transactionRunner,
+            IdGenerator idGenerator,
+            Clock clock) {
+        return new com.choco.identity.application.service.AdminAuthenticationService(adminRepository,
+                adminRefreshTokenRepository, passwordHasher, tokenService, auditLog, abuseGuard,
+                transactionRunner, idGenerator, clock);
+    }
+
+    @Bean
+    com.choco.identity.application.service.AdminProvisioningService adminProvisioningService(
+            AdminRepository adminRepository,
+            PasswordHasher passwordHasher,
+            PasswordPolicy passwordPolicy,
+            AuditLogPort auditLog,
+            IdGenerator idGenerator,
+            Clock clock) {
+        return new com.choco.identity.application.service.AdminProvisioningService(adminRepository,
+                passwordHasher, passwordPolicy, auditLog, idGenerator, clock);
     }
 }

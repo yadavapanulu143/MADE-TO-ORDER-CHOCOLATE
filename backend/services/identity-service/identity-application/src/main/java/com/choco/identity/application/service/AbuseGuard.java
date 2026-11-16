@@ -81,6 +81,8 @@ public class AbuseGuard {
 
     private static final String LOGIN_IDENTIFIER = "rl:login:id:";
     private static final String LOGIN_IP = "rl:login:ip:";
+    private static final String ADMIN_LOGIN_IDENTIFIER = "rl:adminlogin:id:";
+    private static final String ADMIN_LOGIN_IP = "rl:adminlogin:ip:";
     private static final String OTP_VERIFY = "rl:otp:verify:";
     private static final String OTP_RESEND = "rl:otp:resend:";
     private static final String RESET_IDENTIFIER = "rl:reset:id:";
@@ -109,6 +111,27 @@ public class AbuseGuard {
                 policy.loginWindow(), "Too many sign-in attempts for this account. Please wait and try again.");
         consumeIfKnown(LOGIN_IP + ipAddress, policy.loginAttemptsPerIp(), policy.loginWindow(),
                 "Too many sign-in attempts from this network. Please wait and try again.");
+    }
+
+    /**
+     * Limits administrator sign-in attempts, with its own counter namespace.
+     *
+     * <p>A separate key from {@link #checkLogin} is deliberate. Administrator accounts are far fewer
+     * and far more valuable than customer accounts, so an attack on them must not be able to consume
+     * the budget that a shared NAT of customers relies on, and a flood against customers must not
+     * throttle the seller out of their own dashboard. The thresholds are the same; only the counter
+     * is distinct.
+     */
+    public void checkAdminLogin(String email, String ipAddress) {
+        consume(ADMIN_LOGIN_IDENTIFIER + hash(normalise(email)), policy.loginAttemptsPerIdentifier(),
+                policy.loginWindow(), "Too many sign-in attempts for this account. Please wait and try again.");
+        consumeIfKnown(ADMIN_LOGIN_IP + ipAddress, policy.loginAttemptsPerIp(), policy.loginWindow(),
+                "Too many sign-in attempts from this network. Please wait and try again.");
+    }
+
+    /** Clears the administrator account counter after a successful sign-in. */
+    public void adminLoginSucceeded(String email) {
+        rateLimiter.reset(ADMIN_LOGIN_IDENTIFIER + hash(normalise(email)));
     }
 
     /**

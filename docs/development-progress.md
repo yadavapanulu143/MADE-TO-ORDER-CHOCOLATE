@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 248 tests, 0 failures, 0 errors. Integration tests
+**Last verified:** `mvn verify` in `backend/` — 282 tests, 0 failures, 0 errors. Integration tests
 (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container, and the
 identity service was started and its endpoints driven over HTTP to confirm the behaviour end to end.
@@ -56,7 +56,7 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | 3.5 | Login / logout | DONE | `AuthenticationServiceTest` (14 tests); refresh-token rotation with replay detection |
 | 3.6 | Password reset | DONE | `PasswordResetServiceTest` (9 tests) |
 | 3.7 | Argon2id hashing (BCrypt-15 fallback) | DONE | `common-security`; 23 tests green |
-| 3.8 | Admin authentication | TODO | No admin login endpoint; admin is a role on the customer token, and no admin account is seeded |
+| 3.8 | Admin authentication | DONE | Separate `AdminAccount` aggregate and `admin_accounts` table (`V3__admin_accounts.sql`); `POST /api/v1/auth/admin/login`, `/refresh`, `/logout`; role (`ADMIN`/`SUPER_ADMIN`) read from the row, never from input; first admin seeded once from `choco.admin.bootstrap.*` (idempotent, refuses a weak password, never overwrites); admin rate limits use separate counters; `AdminAccountTest` (8) + `AdminAuthenticationServiceTest` (13) + `AdminProvisioningServiceTest` (5) + `AdminAuthControllerTest` (5) + `AbuseGuardTest` (+3); verified over HTTP (16 checks) including customer/admin boundary isolation |
 | 3.9 | Role-based authorization | DONE | `role`/`permissions` JWT claims → authorities; `@EnableMethodSecurity` |
 | 3.10 | Login rate limiting / brute-force protection | DONE | `AbuseGuard` + `RedisRateLimiter`; 10 unit tests + 4 integration tests + verified over HTTP |
 | 3.11 | Verification codes never logged in production | DONE | `CHOCO_LOG_OTP` defaults to `false` in both the shipped config and the fail-closed `@Value` fallback; a loud startup WARN fires when it is enabled. `NotificationAdapterOtpLoggingTest` (6) + `OtpLoggingDefaultTest` (2), both confirmed to fail on a regression. Verified at runtime: 0 codes logged by default, 2 when opted in |
@@ -191,7 +191,7 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | Prevent duplicate payment processing | TODO | Phase 6 idempotency |
 | Prevent incorrect order/inventory status | TODO | Phase 5/7 state machines |
 | Customers access only own data | DONE | `requireOwnerOrAdmin` + tests |
-| Admin access protected | DONE | RBAC + permission tests |
+| Admin access protected | DONE | RBAC + permission tests; separate admin aggregate, no public admin sign-up, customer credentials rejected at the admin endpoint (verified over HTTP) |
 | Never hardcode credentials | DONE | `.env.example` only, no values committed |
 | Never fabricate payment/delivery data | DONE | Delivery is manual by design |
 | Error handling and audit logs | IN PROGRESS | Error handling done; audit log in Phase 3 |
@@ -207,9 +207,9 @@ and default handling, against the real PostgreSQL schema with Flyway applied.
 | common-security | 23 | green |
 | common-events | 6 | green |
 | common-redis | 4 (integration) | green |
-| identity-domain | 39 | green |
-| identity-application | 84 | green |
+| identity-domain | 52 | green |
+| identity-application | 132 | green |
 | identity-adapters-out | 6 | green |
-| identity-adapters-in | 1 | green |
+| identity-adapters-in | 6 | green |
 | identity-app | 6 | green |
-| **Total** | **248** | **green** |
+| **Total** | **282** | **green** |

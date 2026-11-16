@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 class AbuseGuardTest {
 
     private static final String IDENTIFIER = "asha@example.com";
+    private static final String ADMIN_IDENTIFIER = "owner@choco.example";
     private static final String IP = "203.0.113.7";
 
     private Fakes.InMemoryRateLimiter limiter;
@@ -153,6 +154,49 @@ class AbuseGuardTest {
         }
 
         assertThatCode(() -> guard.checkRegistration(null)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void repeated_admin_login_attempts_for_one_account_are_refused() {
+        int limit = AbuseGuard.Policy.defaults().loginAttemptsPerIdentifier();
+
+        for (int i = 0; i < limit; i++) {
+            assertThatCode(() -> guard.checkAdminLogin(ADMIN_IDENTIFIER, IP))
+                    .doesNotThrowAnyException();
+        }
+
+        assertThatThrownBy(() -> guard.checkAdminLogin(ADMIN_IDENTIFIER, IP))
+                .as("the attempt after the limit must be refused")
+                .isInstanceOf(RateLimitedException.class);
+    }
+
+    @Test
+    void admin_and_customer_login_counters_are_independent() {
+        int limit = AbuseGuard.Policy.defaults().loginAttemptsPerIdentifier();
+
+        // Exhaust the admin budget for this address.
+        for (int i = 0; i < limit; i++) {
+            guard.checkAdminLogin(ADMIN_IDENTIFIER, IP);
+        }
+        assertThatThrownBy(() -> guard.checkAdminLogin(ADMIN_IDENTIFIER, IP))
+                .isInstanceOf(RateLimitedException.class);
+
+        // A customer signing in from the same address must be unaffected: the seller being locked
+        // out of the dashboard must not lock customers out of the storefront, or vice versa.
+        assertThatCode(() -> guard.checkLogin(IDENTIFIER, IP)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void a_successful_admin_login_clears_the_admin_account_counter_only() {
+        guard.checkAdminLogin(ADMIN_IDENTIFIER, IP);
+        guard.checkLogin(ADMIN_IDENTIFIER, IP);
+
+        guard.adminLoginSucceeded(ADMIN_IDENTIFIER);
+
+        assertThat(limiter.currentCount("rl:adminlogin:id:hash:" + ADMIN_IDENTIFIER)).isZero();
+        assertThat(limiter.currentCount("rl:login:id:hash:" + ADMIN_IDENTIFIER))
+                .as("clearing the admin counter must not touch the customer counter")
+                .isEqualTo(1);
     }
 
     @Test

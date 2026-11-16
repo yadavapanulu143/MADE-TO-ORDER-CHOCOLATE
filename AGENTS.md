@@ -143,9 +143,25 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     the "verified" badge — receiving password-reset mail for a mailbox that is not theirs. A code is
     then issued to the *new* destination, not the old one. Two tests fail if the flag is left set.
 
+23. **Administrators are a separate aggregate and table, not customers with a flag.** `AdminAccount`
+    has its own repository, its own refresh tokens (`admin_refresh_tokens`), and its own login
+    endpoint under `/api/v1/auth/admin`. The separation is the authorisation boundary: a
+    self-registered customer can never present their own credentials at the admin endpoint, because
+    the admin service never consults the customers table. The role is read from the administrator row
+    at token-issue time and is never taken from request input, so it can only be `ADMIN` or
+    `SUPER_ADMIN`. There is deliberately no public admin sign-up; the first administrator is created
+    once from `choco.admin.bootstrap.*` and that configuration is then cleared. The bootstrap is
+    idempotent — it refuses a weak password rather than seeding one and never overwrites an existing
+    account, so a restart with different credentials cannot reset a live password.
+
+24. **Admin and customer rate limits use the same thresholds but separate counters.** `AbuseGuard`
+    keys admin attempts under `rl:adminlogin:*` rather than `rl:login:*`. Sharing one counter would
+    mean a flood of customer sign-ins from a shared NAT could throttle the seller out of their own
+    dashboard, and an attack on the dashboard could lock customers out of the storefront.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **248 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **282 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -155,12 +171,12 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | common-security | 23 |
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
-| identity-domain | 44 |
-| identity-application | 111 |
+| identity-domain | 52 |
+| identity-application | 132 |
 | identity-adapters-out | 6 |
-| identity-adapters-in | 1 |
+| identity-adapters-in | 6 |
 | identity-app | 6 |
-| **total** | **248** |
+| **total** | **282** |
 
 ## Local dev services
 

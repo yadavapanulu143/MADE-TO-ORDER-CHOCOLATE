@@ -1,8 +1,11 @@
 package com.choco.identity.adapter.out.persistence;
 
+import com.choco.core.domain.EmailAddress;
 import com.choco.core.domain.PhoneNumber;
 import com.choco.core.domain.Pincode;
 import com.choco.identity.domain.address.Address;
+import com.choco.identity.domain.admin.AdminAccount;
+import com.choco.identity.domain.admin.AdminRole;
 import com.choco.identity.domain.customer.ContactDetails;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
@@ -94,6 +97,29 @@ final class PersistenceMapper {
                 entity.getCity(), entity.getState(), Pincode.of(entity.getPincode()),
                 entity.getDeliveryInstructions(), entity.isDefault(), entity.getCreatedAt(),
                 entity.getUpdatedAt());
+    }
+
+    static AdminJpaEntity toEntity(AdminAccount account) {
+        AdminJpaEntity entity = new AdminJpaEntity();
+        entity.setId(account.id());
+        entity.setFullName(account.fullName());
+        entity.setEmail(account.email().value());
+        entity.setPasswordHash(account.passwordHash());
+        entity.setRole(account.role().name());
+        entity.setActive(account.isActive());
+        entity.setFailedLoginAttempts(account.failedLoginAttempts());
+        entity.setLockedUntil(account.lockedUntil());
+        entity.setCreatedAt(account.createdAt());
+        entity.setUpdatedAt(account.updatedAt());
+        return entity;
+    }
+
+    /** Rebuilds the aggregate with {@code rehydrate}, never {@code provision}. */
+    static AdminAccount toDomain(AdminJpaEntity entity) {
+        return AdminAccount.rehydrate(entity.getId(), entity.getFullName(),
+                EmailAddress.of(entity.getEmail()), entity.getPasswordHash(),
+                AdminRole.valueOf(entity.getRole()), entity.isActive(), entity.getFailedLoginAttempts(),
+                entity.getLockedUntil(), entity.getCreatedAt(), entity.getUpdatedAt());
     }
 
     private static Set<String> channelNames(Customer customer) {

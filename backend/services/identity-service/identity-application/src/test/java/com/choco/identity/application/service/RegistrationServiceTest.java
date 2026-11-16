@@ -11,7 +11,9 @@ import com.choco.identity.application.command.RegisterCustomerCommand;
 import com.choco.identity.application.dto.RegistrationResult;
 import com.choco.identity.application.fake.InMemoryCustomerRepository;
 import com.choco.identity.application.fake.InMemoryOtpChallengeRepository;
+import com.choco.identity.application.fake.SnapshottingTransactionRunner;
 import com.choco.identity.domain.customer.VerificationChannel;
+import com.choco.identity.application.fake.TestAbuseGuard;
 import com.choco.test.Fakes;
 import java.util.ArrayList;
 import java.util.List;
@@ -106,8 +108,9 @@ class RegistrationServiceTest {
         };
 
         service = new RegistrationService(customers, challenges, hasher, policy, otpCodes, delivery,
-                notifications, audit, events, new Fakes.SequentialIdGenerator(),
-                Fakes.FixedClock.startingAt("2026-03-01T09:00:00Z"));
+                notifications, audit, events, TestAbuseGuard.create(),
+                new SnapshottingTransactionRunner(customers, challenges),
+                new Fakes.SequentialIdGenerator(), Fakes.FixedClock.startingAt("2026-03-01T09:00:00Z"));
     }
 
     private static RegisterCustomerCommand command(String email, String mobile) {
@@ -226,5 +229,134 @@ class RegistrationServiceTest {
         assertThatThrownBy(() -> service.resendChallenge(UUID.randomUUID().toString(),
                 VerificationChannel.EMAIL))
                 .isInstanceOf(com.choco.core.error.NotFoundException.class);
+    }
+
+    @Test
+    void a_failure_after_the_customer_write_leaves_no_customer_behind() {
+        // Forces the second challenge to fail inside the unit of work. Without a transaction the
+        // customer row would already have been committed by the first save, which is exactly the
+        // half-registered state that made a retry report EMAIL_ALREADY_REGISTERED.
+        var failingChallenges = new InMemoryOtpChallengeRepository() {
+            private int saves = 0;
+
+            @Override
+            public com.choco.identity.domain.otp.OtpChallenge save(
+                    com.choco.identity.domain.otp.OtpChallenge challenge) {
+                if (++saves == 2) {
+                    throw new IllegalStateException("simulated failure while issuing the second challenge");
+                }
+                return super.save(challenge);
+            }
+        };
+
+        var failing = new RegistrationService(customers, failingChallenges, new Hasher(), new Policy(),
+                new OtpCodes(), new Delivery(), new Notifications(), new Audit(), events, TestAbuseGuard.create(),
+                new SnapshottingTransactionRunner(customers, failingChallenges),
+                new Fakes.SequentialIdGenerator(), Fakes.FixedClock.startingAt("2026-03-01T09:00:00Z"));
+
+        assertThatThrownBy(() -> failing.register(command("asha@example.com", "+919876543210")))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(customers.count())
+                .as("a partial failure must not leave a customer who can never be verified")
+                .isZero();
+
+        // The decisive check: the address must be free again, so the customer can retry.
+        assertThat(customers.existsByEmail(com.choco.core.domain.EmailAddress.of("asha@example.com")))
+                .as("the email must not stay permanently taken by a rolled-back attempt")
+                .isFalse();
+    }
+
+    @Test
+    void no_verification_code_is_delivered_when_the_transaction_rolls_back() {
+        var failingChallenges = new InMemoryOtpChallengeRepository() {
+            @Override
+            public com.choco.identity.domain.otp.OtpChallenge save(
+                    com.choco.identity.domain.otp.OtpChallenge challenge) {
+                throw new IllegalStateException("simulated failure");
+            }
+        };
+
+        var failing = new RegistrationService(customers, failingChallenges, new Hasher(), new Policy(),
+                new OtpCodes(), new Delivery(), new Notifications(), new Audit(), events, TestAbuseGuard.create(),
+                new SnapshottingTransactionRunner(customers, failingChallenges),
+                new Fakes.SequentialIdGenerator(), Fakes.FixedClock.startingAt("2026-03-01T09:00:00Z"));
+
+        assertThatThrownBy(() -> failing.register(command("asha@example.com", "+919876543210")))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(deliveredCodes)
+                .as("a code must never be sent for an account that was rolled back")
+                .isEmpty();
+    }
+
+    private static final class Hasher implements com.choco.core.port.PasswordHasher {
+        @Override
+        public String hash(String rawPassword) {
+            return "hashed:" + rawPassword;
+        }
+
+        @Override
+        public boolean matches(String rawPassword, String storedHash) {
+            return storedHash.equals(hash(rawPassword));
+        }
+
+        @Override
+        public boolean needsRehash(String storedHash) {
+            return false;
+        }
+    }
+
+    private static final class Policy implements com.choco.core.port.PasswordPolicy {
+        @Override
+        public List<String> violations(String rawPassword) {
+            return rawPassword != null && rawPassword.length() >= 12 ? List.of() : List.of("too short");
+        }
+    }
+
+    private static final class OtpCodes implements com.choco.identity.domain.port.OtpCodeService {
+        private int counter = 200000;
+
+        @Override
+        public String generateCode() {
+            return String.valueOf(++counter);
+        }
+
+        @Override
+        public String hashCode(String code) {
+            return "otp:" + code;
+        }
+
+        @Override
+        public boolean matches(String submittedCode, String storedHash) {
+            return storedHash.equals("otp:" + submittedCode);
+        }
+    }
+
+    private static final class Delivery implements com.choco.identity.application.port.OtpDeliveryPort {
+        @Override
+        public void deliver(VerificationChannel channel, String destination, String code, String fullName) {
+        }
+    }
+
+    private static final class Notifications implements com.choco.identity.application.port.AccountNotificationPort {
+        @Override
+        public void welcome(String email, String fullName) {
+        }
+
+        @Override
+        public void passwordChanged(String email, String fullName) {
+        }
+
+        @Override
+        public void passwordResetRequested(String email, String fullName, String resetToken) {
+        }
+    }
+
+    private static final class Audit implements com.choco.identity.application.port.AuditLogPort {
+        @Override
+        public void record(String actorType, String actorId, String action, String targetType,
+                           String targetId, String outcome, String detail, String correlationId) {
+        }
     }
 }

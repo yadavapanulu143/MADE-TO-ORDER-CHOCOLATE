@@ -17,6 +17,7 @@ import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
 import com.choco.core.port.PasswordHasher;
 import com.choco.security.principal.AuthenticatedUser;
+import com.choco.identity.application.fake.TestAbuseGuard;
 import com.choco.test.Fakes;
 import java.time.Instant;
 import java.util.Set;
@@ -96,7 +97,7 @@ class AuthenticationServiceTest {
         };
 
         service = new AuthenticationService(customers, refreshTokens, hasher, tokenService, audit,
-                new Fakes.SequentialIdGenerator(), clock);
+                TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(), new Fakes.SequentialIdGenerator(), clock);
     }
 
     private LoginCommand login(String identifier, String password) {

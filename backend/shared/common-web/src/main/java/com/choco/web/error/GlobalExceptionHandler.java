@@ -2,6 +2,7 @@ package com.choco.web.error;
 
 import com.choco.core.error.DomainException;
 import com.choco.core.error.ErrorCode;
+import com.choco.core.error.RateLimitedException;
 import com.choco.core.error.ValidationException;
 import com.choco.web.filter.CorrelationIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -48,6 +49,26 @@ public class GlobalExceptionHandler {
                 ex.getMessage());
 
         return build(code, ex.getMessage(), fieldErrors, request);
+    }
+
+    /**
+     * Answers a rate-limited caller with {@code Retry-After}.
+     *
+     * <p>The header is the difference between a client that backs off and one that retries
+     * immediately in a loop. {@code Retry-After} is the standard signal and is understood by browsers
+     * and HTTP clients without any custom handling.
+     */
+    @ExceptionHandler(RateLimitedException.class)
+    public ResponseEntity<com.choco.web.json.ApiError> handleRateLimited(
+            RateLimitedException ex, HttpServletRequest request) {
+        log.info("Rate limit hit on {} {}: {} [correlationId={}]",
+                request.getMethod(), request.getRequestURI(), ex.getMessage(), correlationId(request));
+
+        ResponseEntity<com.choco.web.json.ApiError> response =
+                build(ex.errorCode(), ex.getMessage(), null, request);
+        return ResponseEntity.status(response.getStatusCode())
+                .header("Retry-After", String.valueOf(ex.retryAfterSeconds()))
+                .body(response.getBody());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -14,7 +14,9 @@ import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -22,9 +24,17 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Wires the outbox publisher, relay and the shared broker topology into each producing service.
+ *
+ * <p>The {@code after = RabbitAutoConfiguration.class} declaration is required, not cosmetic.
+ * {@code @ConditionalOnBean} is evaluated when this class is processed, and auto-configurations run
+ * in a defined order. Without it, the {@link org.springframework.amqp.rabbit.core.RabbitTemplate}
+ * bean may not exist yet when the relay's condition is checked, the relay is silently skipped, and
+ * the service fails later with a confusing message about a missing {@code OutboxRelay} rather than
+ * about the ordering.
  */
-@AutoConfiguration
+@AutoConfiguration(after = RabbitAutoConfiguration.class)
 @EnableScheduling
+@ConditionalOnClass(RabbitTemplate.class)
 public class EventsAutoConfiguration {
 
     @Bean

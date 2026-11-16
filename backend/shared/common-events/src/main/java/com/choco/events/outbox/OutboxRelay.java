@@ -75,8 +75,17 @@ public class OutboxRelay {
         EventEnvelope envelope = EventEnvelope.of(event.getId(), event.getEventType(), event.getSchemaVersion(),
                 event.getAggregateId(), event.getOccurredAt(), event.getCorrelationId(), null, payload);
 
-        rabbitTemplate.convertAndSend(RabbitTopology.EXCHANGE, event.getEventType(), envelope, message -> {
+        // Serialise to a JSON String rather than handing the envelope object to the template. The
+        // default SimpleMessageConverter accepts only String, byte[] and Serializable, so an envelope
+        // object fails at publish time with "received: com.choco.events.envelope.EventEnvelope" and the
+        // event is retried until it exceeds its attempt limit. A String also pins the wire format: the
+        // body is JSON for every consumer, instead of depending on whichever converter a given service
+        // happens to configure.
+        String body = serialise(envelope);
+
+        rabbitTemplate.convertAndSend(RabbitTopology.EXCHANGE, event.getEventType(), body, message -> {
             message.getMessageProperties().setContentType("application/json");
+            message.getMessageProperties().setContentEncoding("UTF-8");
             message.getMessageProperties().setDeliveryMode(MessageDeliveryMode.PERSISTENT);
             message.getMessageProperties().setMessageId(event.getId().toString());
             message.getMessageProperties().setHeader("eventType", event.getEventType());
@@ -85,6 +94,14 @@ public class OutboxRelay {
             }
             return message;
         });
+    }
+
+    private String serialise(EventEnvelope envelope) {
+        try {
+            return objectMapper.writeValueAsString(envelope);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Could not serialise event envelope: " + envelope.eventId(), ex);
+        }
     }
 
     @SuppressWarnings("unchecked")

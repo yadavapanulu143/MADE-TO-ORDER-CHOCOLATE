@@ -17,6 +17,7 @@ import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
 import com.choco.identity.domain.port.CustomerRepository;
 import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.TransactionRunner;
 import com.choco.security.principal.AuthenticatedUser;
 import com.choco.security.principal.Roles;
 import java.time.Duration;
@@ -46,6 +47,8 @@ public class AuthenticationService {
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
     private final AuditLogPort auditLog;
+    private final AbuseGuard abuseGuard;
+    private final TransactionRunner transactionRunner;
     private final IdGenerator idGenerator;
     private final Clock clock;
 
@@ -54,6 +57,8 @@ public class AuthenticationService {
                                  PasswordHasher passwordHasher,
                                  TokenService tokenService,
                                  AuditLogPort auditLog,
+                                 AbuseGuard abuseGuard,
+                                 TransactionRunner transactionRunner,
                                  IdGenerator idGenerator,
                                  Clock clock) {
         this.customerRepository = customerRepository;
@@ -61,12 +66,20 @@ public class AuthenticationService {
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
         this.auditLog = auditLog;
+        this.abuseGuard = abuseGuard;
+        this.transactionRunner = transactionRunner;
         this.idGenerator = idGenerator;
         this.clock = clock;
     }
 
     public AuthenticationResult login(LoginCommand command) {
         Instant now = clock.now();
+
+        // Checked before the password, and before the account lookup, so a flood costs one Redis
+        // round trip rather than an Argon2id hash per request. Consumed for every attempt whether or
+        // not the account exists, so the 429 is not an account-enumeration signal.
+        abuseGuard.checkLogin(command.identifier(), command.ipAddress());
+
         Optional<Customer> found = findByEmailOrMobile(command.identifier());
 
         if (found.isEmpty()) {
@@ -80,7 +93,9 @@ public class AuthenticationService {
 
         if (!passwordMatches) {
             customer.recordFailedLogin(now);
-            customerRepository.save(customer);
+            // Its own transaction: the attempt count is the lockout control, and it has to survive
+            // the exception thrown immediately below.
+            transactionRunner.executeInNewTransaction(() -> customerRepository.save(customer));
             auditLog.record("CUSTOMER", customer.id().toString(), "LOGIN_FAILED", "CUSTOMER",
                     customer.id().toString(), "FAILURE", "BAD_PASSWORD", null);
             throw invalidCredentials();
@@ -99,6 +114,10 @@ public class AuthenticationService {
         }
         customer.recordSuccessfulLogin(now);
         customerRepository.save(customer);
+
+        // A correct password clears the account counter so a legitimate user who mistyped a few times
+        // starts clean. The per-address counter is deliberately left alone.
+        abuseGuard.loginSucceeded(command.identifier());
 
         TokenPair tokens = issueTokens(customer, now);
         auditLog.record("CUSTOMER", customer.id().toString(), "LOGIN_SUCCESS", "CUSTOMER",

@@ -3,6 +3,11 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
+**Last verified:** `mvn verify` in `backend/` — 167 tests, 0 failures, 0 errors. Integration tests
+(`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
+The Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container, and the
+identity service was started and its endpoints driven over HTTP to confirm the behaviour end to end.
+
 ---
 
 ## Phase 1 — Project foundation
@@ -29,37 +34,37 @@ A phase is only marked DONE when its tests run green and the behaviour has been 
 
 ## Phase 2 — Backend foundation
 
-| # | Requirement | Status |
-|---|---|---|
-| 2.1 | Service module skeleton (5-module Clean Architecture each) | TODO |
-| 2.2 | API Gateway routing | TODO |
-| 2.3 | Flyway migrations per service | TODO |
-| 2.4 | Redis integration (cache, rate limiting) | TODO |
-| 2.5 | Inter-service REST client with timeouts/retries | TODO |
-| 2.6 | Health checks + readiness probes | TODO |
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 2.1 | Service module skeleton (5-module Clean Architecture each) | DONE | identity-service: domain / application / adapters-out / adapters-in / app |
+| 2.2 | API Gateway routing | TODO | `gateway/` module not created |
+| 2.3 | Flyway migrations per service | DONE | `identity-app/src/main/resources/db/migration/V1__identity_schema.sql` |
+| 2.4 | Redis integration (cache, rate limiting) | DONE | `shared/common-redis`; `RedisRateLimiterIT` (4 tests) green against a real Redis |
+| 2.5 | Inter-service REST client with timeouts/retries | TODO | No consumer yet; identity is self-contained |
+| 2.6 | Health checks + readiness probes | DONE | `/actuator/health` public; probes enabled |
 
 ## Phase 3 — Authentication and security
 
-| # | Requirement | Status |
-|---|---|---|
-| 3.1 | Customer registration (name, email, mobile, password) | TODO |
-| 3.2 | Email OTP verification | TODO |
-| 3.3 | Mobile OTP verification | TODO |
-| 3.4 | OTP expiry, resend limits, max attempts | TODO |
-| 3.5 | Login / logout | TODO |
-| 3.6 | Password reset | TODO |
-| 3.7 | Argon2id hashing (BCrypt-15 fallback) | TODO |
-| 3.8 | Admin authentication | TODO |
-| 3.9 | Role-based authorization | TODO |
-| 3.10 | Login rate limiting / brute-force protection | TODO |
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 3.1 | Customer registration (name, email, mobile, password) | DONE | `AuthController#register`; `RegistrationServiceTest` (13 tests) |
+| 3.2 | Email OTP verification | DONE | `POST /api/v1/auth/customers/{id}/verifications?channel=EMAIL` |
+| 3.3 | Mobile OTP verification | DONE | Same endpoint, `channel=MOBILE`; `VerificationServiceTest` (10 tests) |
+| 3.4 | OTP expiry, resend limits, max attempts | DONE | Enforced in the `OtpChallenge` aggregate; `AbuseGuard` adds per-customer resend/verify budgets |
+| 3.5 | Login / logout | DONE | `AuthenticationServiceTest` (14 tests); refresh-token rotation with replay detection |
+| 3.6 | Password reset | DONE | `PasswordResetServiceTest` (9 tests) |
+| 3.7 | Argon2id hashing (BCrypt-15 fallback) | DONE | `common-security`; 23 tests green |
+| 3.8 | Admin authentication | TODO | No admin login endpoint; admin is a role on the customer token, and no admin account is seeded |
+| 3.9 | Role-based authorization | DONE | `role`/`permissions` JWT claims → authorities; `@EnableMethodSecurity` |
+| 3.10 | Login rate limiting / brute-force protection | DONE | `AbuseGuard` + `RedisRateLimiter`; 10 unit tests + 4 integration tests + verified over HTTP |
 
 ## Phase 4 — Customer and product management
 
 | # | Requirement | Status |
 |---|---|---|
-| 4.1 | Customer profile view/update | TODO |
+| 4.1 | Customer profile view/update | IN PROGRESS |
 | 4.2 | Delivery address management | TODO |
-| 4.3 | Verification status display | TODO |
+| 4.3 | Verification status display | DONE |
 | 4.4 | Product catalogue (multi-product ready) | TODO |
 | 4.5 | Product images | TODO |
 | 4.6 | Pricing + variants/sizes | TODO |

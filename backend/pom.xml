@@ -23,15 +23,21 @@
     <module>shared/common-web</module>
     <module>shared/common-security</module>
     <module>shared/common-events</module>
+    <module>shared/common-redis</module>
     <module>shared/common-test</module>
-    <module>gateway</module>
     <module>services/identity-service</module>
-    <module>services/catalog-service</module>
-    <module>services/order-service</module>
-    <module>services/payment-service</module>
-    <module>services/fulfilment-service</module>
-    <module>services/notification-service</module>
-    <module>services/reporting-service</module>
+    <!--
+      Modules below are not implemented yet. A module listed here without a pom.xml breaks the whole
+      reactor, so every build fails before it starts, including the ones that would otherwise pass.
+      Uncomment each entry as the service is implemented, in the order the plan defines.
+    -->
+    <!-- <module>gateway</module> -->
+    <!-- <module>services/catalog-service</module> -->
+    <!-- <module>services/order-service</module> -->
+    <!-- <module>services/payment-service</module> -->
+    <!-- <module>services/fulfilment-service</module> -->
+    <!-- <module>services/notification-service</module> -->
+    <!-- <module>services/reporting-service</module> -->
   </modules>
 
   <properties>
@@ -50,6 +56,7 @@
     <archunit.version>1.5.1</archunit.version>
     <greenmail.version>2.1.15</greenmail.version>
     <nimbus-jose-jwt.version>9.40</nimbus-jose-jwt.version>
+    <logstash-encoder.version>8.1</logstash-encoder.version>
 
     <maven-enforcer-plugin.version>3.5.0</maven-enforcer-plugin.version>
 
@@ -127,6 +134,11 @@
         <artifactId>nimbus-jose-jwt</artifactId>
         <version>${nimbus-jose-jwt.version}</version>
       </dependency>
+      <dependency>
+        <groupId>net.logstash.logback</groupId>
+        <artifactId>logstash-logback-encoder</artifactId>
+        <version>${logstash-encoder.version}</version>
+      </dependency>
 
       <!-- Internal shared modules -->
       <dependency>
@@ -147,6 +159,11 @@
       <dependency>
         <groupId>com.choco</groupId>
         <artifactId>common-events</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>common-redis</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -242,6 +259,24 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
+      </plugin>
+      <!--
+        Binds failsafe to the integration-test and verify phases, so tests named *IT run during
+        `mvn verify`. Declaring the plugin without an execution leaves the goals unbound, and the
+        tests are then never run: they compile, they appear in the source tree, and nothing reports
+        that they were skipped. Binding it here means every module's integration tests actually run.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

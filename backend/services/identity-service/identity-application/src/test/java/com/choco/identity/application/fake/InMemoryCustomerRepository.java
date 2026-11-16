@@ -52,4 +52,14 @@ public class InMemoryCustomerRepository implements CustomerRepository {
     public int count() {
         return byId.size();
     }
+
+    /** Snapshot for transaction tests: the caller restores it to simulate a rollback. */
+    public Map<UUID, Customer> snapshot() {
+        return new LinkedHashMap<>(byId);
+    }
+
+    public void restore(Map<UUID, Customer> snapshot) {
+        byId.clear();
+        byId.putAll(snapshot);
+    }
 }

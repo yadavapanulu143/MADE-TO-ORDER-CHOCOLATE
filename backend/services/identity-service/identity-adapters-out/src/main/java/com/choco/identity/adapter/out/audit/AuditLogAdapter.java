@@ -25,9 +25,6 @@ class AuditLogAdapter implements AuditLogPort {
 
     private static final Logger log = LoggerFactory.getLogger(AuditLogAdapter.class);
 
-    interface SpringDataAuditLog extends JpaRepository<AuditLogJpaEntity, Long> {
-    }
-
     private final SpringDataAuditLog delegate;
     private final Clock clock;
 

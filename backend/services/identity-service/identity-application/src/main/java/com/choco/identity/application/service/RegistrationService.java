@@ -4,10 +4,14 @@ import com.choco.core.domain.EmailAddress;
 import com.choco.core.domain.PhoneNumber;
 import com.choco.core.error.ConflictException;
 import com.choco.core.error.ErrorCode;
+import com.choco.core.error.NotFoundException;
 import com.choco.core.error.ValidationException;
 import com.choco.core.port.Clock;
 import com.choco.core.port.EventPublisher;
 import com.choco.core.port.IdGenerator;
+import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.PasswordPolicy;
+import com.choco.core.port.TransactionRunner;
 import com.choco.identity.application.command.RegisterCustomerCommand;
 import com.choco.identity.application.dto.RegistrationResult;
 import com.choco.identity.application.port.AccountNotificationPort;
@@ -20,10 +24,9 @@ import com.choco.identity.domain.otp.OtpChallenge;
 import com.choco.identity.domain.port.CustomerRepository;
 import com.choco.identity.domain.port.OtpChallengeRepository;
 import com.choco.identity.domain.port.OtpCodeService;
-import com.choco.core.port.PasswordHasher;
-import com.choco.core.port.PasswordPolicy;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Registers a customer and starts both verification challenges.
@@ -36,6 +39,12 @@ import java.util.List;
  * unique index in the database: two simultaneous registrations of the same email can both pass the
  * check, and one of them must then be rejected by the constraint. That path is handled in the
  * adapter and reported as the same conflict.
+ *
+ * <p>Every persistent write happens inside one transaction. A customer row without its challenges is
+ * not a valid state — the account could never be verified and the address would stay permanently
+ * taken — so a failure part-way through must leave nothing behind. Delivery of the codes happens
+ * <em>after</em> that transaction commits: sending from inside it would mail a customer whose account
+ * a later rollback erases, and the recipient cannot tell the difference.
  */
 public class RegistrationService {
 
@@ -48,6 +57,8 @@ public class RegistrationService {
     private final AccountNotificationPort notifications;
     private final AuditLogPort auditLog;
     private final EventPublisher eventPublisher;
+    private final AbuseGuard abuseGuard;
+    private final TransactionRunner transactionRunner;
     private final IdGenerator idGenerator;
     private final Clock clock;
 
@@ -60,6 +71,8 @@ public class RegistrationService {
                                AccountNotificationPort notifications,
                                AuditLogPort auditLog,
                                EventPublisher eventPublisher,
+                               AbuseGuard abuseGuard,
+                               TransactionRunner transactionRunner,
                                IdGenerator idGenerator,
                                Clock clock) {
         this.customerRepository = customerRepository;
@@ -71,11 +84,17 @@ public class RegistrationService {
         this.notifications = notifications;
         this.auditLog = auditLog;
         this.eventPublisher = eventPublisher;
+        this.abuseGuard = abuseGuard;
+        this.transactionRunner = transactionRunner;
         this.idGenerator = idGenerator;
         this.clock = clock;
     }
 
     public RegistrationResult register(RegisterCustomerCommand command) {
+        // Limits account creation per source address, so the signup form cannot be used to mass-create
+        // accounts or as a way to send verification mail to arbitrary addresses.
+        abuseGuard.checkRegistration(command.ipAddress());
+
         EmailAddress email = EmailAddress.of(command.email());
         PhoneNumber mobile = PhoneNumber.of(command.mobile());
 
@@ -97,12 +116,25 @@ public class RegistrationService {
         ContactDetails contact = ContactDetails.of(command.fullName(), command.email(), command.mobile());
         Customer customer = Customer.register(idGenerator.nextId(), contact,
                 passwordHasher.hash(command.password()), now);
-        customerRepository.save(customer);
 
-        issueChallenge(customer, VerificationChannel.EMAIL, contact.email().value(), now);
-        issueChallenge(customer, VerificationChannel.MOBILE, contact.mobile().value(), now);
+        // Codes are generated before the write so the raw values are available to deliver once the
+        // transaction commits; only their hashes are persisted.
+        String emailCode = otpCodeService.generateCode();
+        String mobileCode = otpCodeService.generateCode();
+        OtpChallenge emailChallenge = challenge(customer, VerificationChannel.EMAIL,
+                contact.email().value(), emailCode, now);
+        OtpChallenge mobileChallenge = challenge(customer, VerificationChannel.MOBILE,
+                contact.mobile().value(), mobileCode, now);
 
-        eventPublisher.publishAll(customer.pullDomainEvents());
+        transactionRunner.execute(() -> {
+            customerRepository.save(customer);
+            otpChallengeRepository.save(emailChallenge);
+            otpChallengeRepository.save(mobileChallenge);
+            eventPublisher.publishAll(customer.pullDomainEvents());
+        });
+
+        deliver(emailChallenge, contact.email().value(), emailCode, contact.fullName());
+        deliver(mobileChallenge, contact.mobile().value(), mobileCode, contact.fullName());
         auditLog.record("CUSTOMER", customer.id().toString(), "CUSTOMER_REGISTERED", "CUSTOMER",
                 customer.id().toString(), "SUCCESS", null, null);
 
@@ -119,35 +151,50 @@ public class RegistrationService {
         Customer customer = requireCustomer(customerIdRaw);
         Instant now = clock.now();
 
+        // Limits resends across challenges, complementing the per-challenge throttle in the domain.
+        // The domain throttle stops rapid repeat requests; this stops a slow trickle over hours.
+        abuseGuard.checkOtpResend(customer.id().toString());
+
         if (customer.isVerified(channel)) {
             throw new ConflictException(ErrorCode.CONFLICT,
                     "This " + channel.name().toLowerCase() + " is already verified");
         }
 
+        String destination = destinationFor(customer, channel);
+        String code = otpCodeService.generateCode();
+
         var existing = otpChallengeRepository.findLatestActive(customer.id(), channel.name());
+        OtpChallenge toPersist;
         if (existing.isPresent()) {
             OtpChallenge current = existing.get();
             current.assertResendAllowed(now);
-            String code = otpCodeService.generateCode();
-            OtpChallenge renewed = current.withNewCode(otpCodeService.hashCode(code), now);
-            otpChallengeRepository.save(renewed);
-            otpDelivery.deliver(channel, destinationFor(customer, channel), code, customer.contact().fullName());
-            auditLog.record("CUSTOMER", customer.id().toString(), "OTP_RESENT", "OTP",
-                    renewed.id().toString(), "SUCCESS", channel.name(), null);
-            return;
+            toPersist = current.withNewCode(otpCodeService.hashCode(code), now);
+        } else {
+            toPersist = challenge(customer, channel, destination, code, now);
         }
 
-        issueChallenge(customer, channel, destinationFor(customer, channel), now);
+        transactionRunner.execute(() -> otpChallengeRepository.save(toPersist));
+
+        deliver(toPersist, destination, code, customer.contact().fullName());
+        auditLog.record("CUSTOMER", customer.id().toString(), "OTP_RESENT", "OTP",
+                toPersist.id().toString(), "SUCCESS", channel.name(), null);
     }
 
-    private void issueChallenge(Customer customer, VerificationChannel channel, String destination, Instant now) {
-        String code = otpCodeService.generateCode();
-        OtpChallenge challenge = OtpChallenge.issue(idGenerator.nextId(), customer.id(), channel.name(),
-                destination, otpCodeService.hashCode(code), now);
-        otpChallengeRepository.save(challenge);
-        otpDelivery.deliver(channel, destination, code, customer.contact().fullName());
-        auditLog.record("CUSTOMER", customer.id().toString(), "OTP_ISSUED", "OTP",
-                challenge.id().toString(), "SUCCESS", channel.name(), null);
+    private OtpChallenge challenge(Customer customer, VerificationChannel channel, String destination,
+                                   String rawCode, Instant now) {
+        return OtpChallenge.issue(idGenerator.nextId(), customer.id(), channel.name(), destination,
+                otpCodeService.hashCode(rawCode), now);
+    }
+
+    /**
+     * Runs after the transaction commits, so a code is never sent for an account that rolled back.
+     * Delivery is best-effort by contract: a mail outage must not undo a completed registration, and
+     * the customer can request a new code.
+     */
+    private void deliver(OtpChallenge challenge, String destination, String code, String fullName) {
+        otpDelivery.deliver(VerificationChannel.valueOf(challenge.channel()), destination, code, fullName);
+        auditLog.record("CUSTOMER", challenge.customerId().toString(), "OTP_ISSUED", "OTP",
+                challenge.id().toString(), "SUCCESS", challenge.channel(), null);
     }
 
     private String destinationFor(Customer customer, VerificationChannel channel) {
@@ -157,8 +204,8 @@ public class RegistrationService {
     }
 
     private Customer requireCustomer(String customerIdRaw) {
-        return customerRepository.findById(java.util.UUID.fromString(customerIdRaw))
-                .orElseThrow(() -> new com.choco.core.error.NotFoundException(
+        return customerRepository.findById(UUID.fromString(customerIdRaw))
+                .orElseThrow(() -> new NotFoundException(
                         ErrorCode.CUSTOMER_NOT_FOUND, "Customer not found"));
     }
 

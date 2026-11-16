@@ -12,6 +12,7 @@ import com.choco.identity.domain.customer.ContactDetails;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
 import com.choco.identity.domain.otp.OtpChallenge;
+import com.choco.identity.application.fake.TestAbuseGuard;
 import com.choco.test.Fakes;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,6 +83,7 @@ class VerificationServiceTest {
         };
 
         service = new VerificationService(customers, challenges, otpCodes, notifications, audit, events,
+                TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(),
                 Fakes.FixedClock.startingAt("2026-03-01T09:00:00Z"));
     }
 

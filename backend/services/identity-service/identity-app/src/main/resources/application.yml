@@ -1,0 +1,127 @@
+server:
+  port: 8081
+  shutdown: graceful
+
+spring:
+  application:
+    name: identity-service
+  datasource:
+    url: ${CHOCO_IDENTITY_DB_URL:jdbc:postgresql://localhost:5432/choco_identity}
+    username: ${CHOCO_IDENTITY_DB_USER:choco_identity}
+    password: ${CHOCO_IDENTITY_DB_PASSWORD:choco_identity_pw}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate validates that the entities match it and never alters it:
+      # an automatic schema update in production can drop a column and its data.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: ${CHOCO_REDIS_HOST:localhost}
+      port: ${CHOCO_REDIS_PORT:6379}
+      password: ${CHOCO_REDIS_PASSWORD:choco_redis_pw}
+      timeout: 2s
+  rabbitmq:
+    host: ${CHOCO_RABBITMQ_HOST:localhost}
+    port: ${CHOCO_RABBITMQ_PORT:5672}
+    username: ${CHOCO_RABBITMQ_USER:choco}
+    password: ${CHOCO_RABBITMQ_PASSWORD:choco_rabbit_pw}
+  mail:
+    host: ${CHOCO_SMTP_HOST:localhost}
+    port: ${CHOCO_SMTP_PORT:1025}
+    username: ${CHOCO_SMTP_USER:}
+    password: ${CHOCO_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${CHOCO_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${CHOCO_SMTP_TLS:false}
+
+choco:
+  security:
+    issuer: choco-identity
+    # Unauthenticated paths for this service only. Registration, verification, sign-in, refresh and
+    # password reset must be reachable without a token; everything else stays authenticated.
+    # The JWKS document is public by design, because other services fetch it to verify tokens.
+    public-paths:
+      - /api/v1/auth/register
+      - /api/v1/auth/login
+      - /api/v1/auth/refresh
+      - /api/v1/auth/logout
+      - /api/v1/auth/password-reset/request
+      - /api/v1/auth/password-reset/complete
+      - /api/v1/auth/customers/**
+      - /.well-known/jwks.json
+    # Where other services fetch the public keys. This service serves them at the same path.
+    jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+    # PEM file holding the RSA signing key. Required outside development; see JwkConfiguration.
+    jwk:
+      location: ${CHOCO_JWK_LOCATION:}
+    access-token-ttl: PT15M
+    password:
+      algorithm: ${CHOCO_PASSWORD_ALGORITHM:argon2id}
+    # Authentication rate limits. Defaults come from AbuseGuard.Policy.defaults(); a key here
+    # overrides one of them. The login limits must stay above Customer.MAX_FAILED_LOGIN_ATTEMPTS (5),
+    # or the per-account lockout would be shadowed by the generic rate-limit error and a locked-out
+    # customer would never see the specific message telling them what happened.
+    rate-limit:
+      login-attempts-per-identifier: ${CHOCO_RL_LOGIN_PER_IDENTIFIER:10}
+      login-attempts-per-ip: ${CHOCO_RL_LOGIN_PER_IP:20}
+      login-window: PT15M
+      otp-verifications-per-customer: ${CHOCO_RL_OTP_VERIFY:10}
+      otp-window: PT15M
+      otp-resends-per-customer: ${CHOCO_RL_OTP_RESEND:5}
+      otp-resend-window: PT15M
+      password-resets-per-identifier: ${CHOCO_RL_RESET_PER_IDENTIFIER:3}
+      password-resets-per-ip: ${CHOCO_RL_RESET_PER_IP:10}
+      password-reset-window: PT15M
+      registrations-per-ip: ${CHOCO_RL_REGISTER_PER_IP:10}
+      registration-window: PT1H
+  notifications:
+    from: ${CHOCO_MAIL_FROM:noreply@choco.example}
+    # Logging an OTP makes registration possible without a mail server. It must be false anywhere
+    # a real customer can register, because log files are copied and shared freely.
+    log-otp: ${CHOCO_LOG_OTP:true}
+  cors:
+    allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    # The mail indicator is off by default because development sends OTPs to the log rather than to
+    # a mail server. Left on, a missing SMTP host would report the whole service DOWN and a
+    # load balancer would stop routing to a service that is in fact healthy. Enable it in
+    # environments where a mail server is a hard dependency.
+    mail:
+      enabled: ${CHOCO_HEALTH_MAIL:false}
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${CHOCO_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${CHOCO_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+logging:
+  level:
+    com.choco: ${CHOCO_LOG_LEVEL:INFO}

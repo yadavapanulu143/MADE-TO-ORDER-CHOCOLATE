@@ -29,4 +29,18 @@ public class InMemoryOtpChallengeRepository implements OtpChallengeRepository {
                 .filter(c -> c.customerId().equals(customerId) && c.channel().equals(channel))
                 .max(Comparator.comparing(OtpChallenge::createdAt));
     }
+
+    /** Snapshot for transaction tests: the caller restores it to simulate a rollback. */
+    public Map<UUID, OtpChallenge> snapshot() {
+        return new LinkedHashMap<>(byId);
+    }
+
+    public void restore(Map<UUID, OtpChallenge> snapshot) {
+        byId.clear();
+        byId.putAll(snapshot);
+    }
+
+    public int count() {
+        return byId.size();
+    }
 }

@@ -6,6 +6,7 @@ import com.choco.identity.domain.customer.VerificationChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
@@ -58,9 +59,9 @@ class NotificationAdapter implements OtpDeliveryPort, AccountNotificationPort {
                     + "Your verification code is " + code + ".\n"
                     + "It expires in 5 minutes. Do not share it with anyone.\n\n"
                     + "If you did not request this, you can ignore this message.\n");
-            mailSender.send(message);
+            deliverQuietly(message, destination);
             if (logOtp) {
-                log.info("Verification code for {} (email) is {}", destination, code);
+                log.info("Verification code for {} (email) is {}", mask(destination), code);
             }
         } else {
             smsSender.send(destination, "Your chocolate order verification code is " + code
@@ -68,6 +69,27 @@ class NotificationAdapter implements OtpDeliveryPort, AccountNotificationPort {
             if (logOtp) {
                 log.info("Verification code for {} (sms) is {}", mask(destination), code);
             }
+        }
+    }
+
+    /**
+     * Sends a message without letting a transport failure fail the caller's business operation.
+     *
+     * <p>Registration already persisted the account and the OTP challenge by the time this runs. If a
+     * mail outage propagated, the whole transaction would roll back and the customer would be unable
+     * to register until the mail server recovered, for a reason unrelated to their account. The
+     * challenge remains valid, and the customer can request a resend once mail is reachable, so
+     * failing the operation would trade a recoverable delivery problem for an unrecoverable one.
+     *
+     * <p>The failure is logged at error level with the destination masked, because a silent failure
+     * here is worse than the original problem: nobody would know a customer is waiting for a code.
+     */
+    private void deliverQuietly(SimpleMailMessage message, String destination) {
+        try {
+            mailSender.send(message);
+        } catch (MailException ex) {
+            log.error("Could not send mail to {}. The account and verification challenge are still "
+                    + "recorded; the customer can request a resend.", mask(destination), ex);
         }
     }
 
@@ -100,7 +122,7 @@ class NotificationAdapter implements OtpDeliveryPort, AccountNotificationPort {
         message.setTo(to);
         message.setSubject(subject);
         message.setText(body);
-        mailSender.send(message);
+        deliverQuietly(message, to);
     }
 
     /** Keeps the tail of an identifier for correlation without printing the whole thing. */

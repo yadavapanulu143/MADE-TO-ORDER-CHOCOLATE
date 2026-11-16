@@ -6,6 +6,7 @@ import com.choco.core.error.ErrorCode;
 import com.choco.core.error.NotFoundException;
 import com.choco.core.port.Clock;
 import com.choco.core.port.EventPublisher;
+import com.choco.core.port.TransactionRunner;
 import com.choco.identity.application.command.VerifyOtpCommand;
 import com.choco.identity.application.dto.CustomerView;
 import com.choco.identity.application.port.AccountNotificationPort;
@@ -35,6 +36,8 @@ public class VerificationService {
     private final AccountNotificationPort notifications;
     private final AuditLogPort auditLog;
     private final EventPublisher eventPublisher;
+    private final AbuseGuard abuseGuard;
+    private final TransactionRunner transactionRunner;
     private final Clock clock;
 
     public VerificationService(CustomerRepository customerRepository,
@@ -43,6 +46,8 @@ public class VerificationService {
                                AccountNotificationPort notifications,
                                AuditLogPort auditLog,
                                EventPublisher eventPublisher,
+                               AbuseGuard abuseGuard,
+                               TransactionRunner transactionRunner,
                                Clock clock) {
         this.customerRepository = customerRepository;
         this.otpChallengeRepository = otpChallengeRepository;
@@ -50,6 +55,8 @@ public class VerificationService {
         this.notifications = notifications;
         this.auditLog = auditLog;
         this.eventPublisher = eventPublisher;
+        this.abuseGuard = abuseGuard;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
@@ -57,6 +64,11 @@ public class VerificationService {
         UUID customerId = parseCustomerId(command.customerId());
         VerificationChannel channel = parseChannel(command.channel());
         Instant now = clock.now();
+
+        // Bounds how many codes one customer can submit, independently of the per-challenge attempt
+        // cap: without it, a customer who exhausts one challenge could request a new code and get a
+        // fresh set of attempts without limit.
+        abuseGuard.checkOtpVerification(customerId.toString());
 
         Customer customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new NotFoundException(ErrorCode.CUSTOMER_NOT_FOUND, "Customer not found"));
@@ -74,18 +86,22 @@ public class VerificationService {
         try {
             challenge.attempt(matched, now);
         } catch (BusinessRuleException failure) {
-            otpChallengeRepository.save(challenge);
+            // The attempt counter has to be durable even though the verification failed. Committing
+            // it in the caller's transaction would roll it back with the exception and hand an
+            // attacker unlimited tries against the attempt cap.
+            transactionRunner.executeInNewTransaction(() -> otpChallengeRepository.save(challenge));
             auditLog.record("CUSTOMER", customerId.toString(), "OTP_VERIFICATION_FAILED", "OTP",
                     challenge.id().toString(), "FAILURE", failure.errorCode().name(), null);
             throw failure;
         }
-        otpChallengeRepository.save(challenge);
 
         boolean wasFullyVerified = customer.fullyVerified();
         customer.verify(channel, now);
-        customerRepository.save(customer);
-
-        eventPublisher.publishAll(customer.pullDomainEvents());
+        transactionRunner.execute(() -> {
+            otpChallengeRepository.save(challenge);
+            customerRepository.save(customer);
+            eventPublisher.publishAll(customer.pullDomainEvents());
+        });
 
         if (!wasFullyVerified && customer.fullyVerified()) {
             notifications.welcome(customer.contact().email().value(), customer.contact().fullName());

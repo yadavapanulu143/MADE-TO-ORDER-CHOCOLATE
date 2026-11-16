@@ -84,4 +84,53 @@ public final class Fakes {
             events.clear();
         }
     }
+
+    /**
+     * Runs the unit of work directly, with no transaction.
+     *
+     * <p>Application tests exercise use-case logic, not commit behaviour — that is the database's job
+     * and is covered by integration tests against a real Postgres. This fake lets the use case keep
+     * its {@code TransactionRunner} dependency without dragging a transaction manager into a plain
+     * unit test.
+     */
+    public static final class DirectTransactionRunner implements com.choco.core.port.TransactionRunner {
+        @Override
+        public <T> T execute(java.util.function.Supplier<T> work) {
+            return work.get();
+        }
+
+        @Override
+        public <T> T executeInNewTransaction(java.util.function.Supplier<T> work) {
+            return work.get();
+        }
+    }
+
+    /**
+     * In-memory rate limiter with the same fixed-window semantics as the Redis implementation.
+     *
+     * <p>Counts are kept in a map and never expire, which is sufficient for a test that asserts the
+     * limit is enforced. The expiry behaviour is Redis's job and is covered against a real server.
+     */
+    public static final class InMemoryRateLimiter implements com.choco.core.port.RateLimiter {
+        private final java.util.Map<String, Long> counts = new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public Decision tryConsume(String key, int limit, long windowSeconds) {
+            long count = counts.merge(key, 1L, Long::sum);
+            if (count > limit) {
+                return Decision.deny(windowSeconds);
+            }
+            return Decision.allow(Math.max(0, limit - count));
+        }
+
+        @Override
+        public long currentCount(String key) {
+            return counts.getOrDefault(key, 0L);
+        }
+
+        @Override
+        public void reset(String key) {
+            counts.remove(key);
+        }
+    }
 }

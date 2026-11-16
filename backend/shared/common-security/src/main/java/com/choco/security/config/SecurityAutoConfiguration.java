@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
@@ -51,6 +52,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  */
 @Configuration
 @EnableMethodSecurity
+@EnableConfigurationProperties(SecurityProperties.class)
 public class SecurityAutoConfiguration {
 
     /** Endpoints every service exposes unauthenticated: liveness, docs and the OpenAPI contract. */
@@ -69,7 +71,8 @@ public class SecurityAutoConfiguration {
     public SecurityFilterChain chocoSecurityFilterChain(
             HttpSecurity http,
             JwtAuthenticationConverter jwtAuthenticationConverter,
-            CorsConfigurationSource corsConfigurationSource) throws Exception {
+            CorsConfigurationSource corsConfigurationSource,
+            SecurityProperties securityProperties) throws Exception {
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -78,10 +81,17 @@ public class SecurityAutoConfiguration {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(PUBLIC_PATHS).permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> {
+                    auth.requestMatchers(PUBLIC_PATHS).permitAll();
+                    // Service-specific unauthenticated paths, supplied by configuration. Declared as
+                    // an explicit list rather than a wildcard so widening public access is a visible
+                    // change in the service's own configuration, not a hidden default.
+                    if (!securityProperties.getPublicPaths().isEmpty()) {
+                        auth.requestMatchers(securityProperties.getPublicPaths().toArray(String[]::new)).permitAll();
+                    }
+                    auth.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll();
+                    auth.anyRequest().authenticated();
+                })
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
                 .headers(headers -> headers

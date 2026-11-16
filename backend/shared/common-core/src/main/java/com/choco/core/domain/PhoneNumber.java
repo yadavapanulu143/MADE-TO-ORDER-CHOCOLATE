@@ -15,7 +15,12 @@ public record PhoneNumber(String value) {
         if (value == null) {
             throw new IllegalArgumentException("Mobile number is required");
         }
-        String digits = COUNTRY_PREFIX.matcher(value.trim().replaceAll("[\\s-]", "")).replaceFirst("");
+        String raw = value.trim().replaceAll("[\\s-]", "");
+        // A national number is exactly 10 digits, so a prefix is only ever present on a longer input.
+        // Stripping unconditionally would corrupt any valid number that begins with 91: the prefix
+        // pattern matches the literal "91", so 9123456780 would lose its first two digits and be
+        // rejected as too short. Gating on length leaves 10-digit inputs untouched.
+        String digits = raw.length() > 10 ? COUNTRY_PREFIX.matcher(raw).replaceFirst("") : raw;
         if (!FORMAT.matcher(digits).matches()) {
             throw new IllegalArgumentException("Invalid Indian mobile number");
         }

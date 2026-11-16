@@ -8,10 +8,12 @@ import com.choco.core.port.Clock;
 import com.choco.core.port.IdGenerator;
 import com.choco.identity.application.port.AccountNotificationPort;
 import com.choco.identity.application.port.AuditLogPort;
+import com.choco.identity.application.port.OpaqueTokenHasher;
 import com.choco.identity.application.port.PasswordResetTokenRepository;
 import com.choco.identity.domain.port.CustomerRepository;
 import com.choco.core.port.PasswordHasher;
 import com.choco.core.port.PasswordPolicy;
+import com.choco.core.port.TransactionRunner;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -33,37 +35,51 @@ public class PasswordResetService {
 
     private final CustomerRepository customerRepository;
     private final PasswordResetTokenRepository tokenRepository;
+    private final OpaqueTokenHasher tokenHasher;
     private final PasswordHasher passwordHasher;
     private final PasswordPolicy passwordPolicy;
     private final AccountNotificationPort notifications;
     private final AuditLogPort auditLog;
     private final AuthenticationService authenticationService;
     private final IdGenerator idGenerator;
+    private final AbuseGuard abuseGuard;
+    private final TransactionRunner transactionRunner;
     private final Clock clock;
 
     public PasswordResetService(CustomerRepository customerRepository,
                                 PasswordResetTokenRepository tokenRepository,
+                                OpaqueTokenHasher tokenHasher,
                                 PasswordHasher passwordHasher,
                                 PasswordPolicy passwordPolicy,
                                 AccountNotificationPort notifications,
                                 AuditLogPort auditLog,
                                 AuthenticationService authenticationService,
                                 IdGenerator idGenerator,
+                                AbuseGuard abuseGuard,
+                                TransactionRunner transactionRunner,
                                 Clock clock) {
         this.customerRepository = customerRepository;
         this.tokenRepository = tokenRepository;
+        this.tokenHasher = tokenHasher;
         this.passwordHasher = passwordHasher;
         this.passwordPolicy = passwordPolicy;
         this.notifications = notifications;
         this.auditLog = auditLog;
         this.authenticationService = authenticationService;
         this.idGenerator = idGenerator;
+        this.abuseGuard = abuseGuard;
+        this.transactionRunner = transactionRunner;
         this.clock = clock;
     }
 
     /** Always completes without revealing whether the address exists. */
-    public void requestReset(String emailRaw) {
+    public void requestReset(String emailRaw, String ipAddress) {
         Instant now = clock.now();
+
+        // Applied to every request, including malformed and unknown addresses, so the 429 cannot be
+        // used to tell a registered address from an unregistered one.
+        abuseGuard.checkPasswordReset(emailRaw == null ? "" : emailRaw, ipAddress);
+
         var email = EmailAddress.tryParse(emailRaw);
         if (email.isEmpty()) {
             auditLog.record("ANONYMOUS", null, "PASSWORD_RESET_REQUESTED", "CUSTOMER", null,
@@ -80,9 +96,11 @@ public class PasswordResetService {
 
         var found = customer.get();
         String rawToken = UUID.randomUUID() + "." + UUID.randomUUID();
-        tokenRepository.store(idGenerator.nextId(), found.id(), passwordHasher.hash(rawToken),
-                now.plus(TOKEN_TTL), now);
+        transactionRunner.execute(() -> tokenRepository.store(idGenerator.nextId(), found.id(),
+                tokenHasher.hash(rawToken), now.plus(TOKEN_TTL), now));
 
+        // Sent only once the token row is committed; mailing from inside the transaction would
+        // deliver a link that a rollback erases.
         notifications.passwordResetRequested(found.contact().email().value(),
                 found.contact().fullName(), rawToken);
         auditLog.record("CUSTOMER", found.id().toString(), "PASSWORD_RESET_REQUESTED", "CUSTOMER",
@@ -93,7 +111,7 @@ public class PasswordResetService {
         Instant now = clock.now();
 
         PasswordResetTokenRepository.StoredResetToken stored =
-                tokenRepository.findByHash(passwordHasher.hash(rawToken))
+                tokenRepository.findByHash(tokenHasher.hash(rawToken))
                         .orElseThrow(() -> new BusinessRuleException(ErrorCode.RESET_TOKEN_INVALID,
                                 "This password reset link is not valid. Please request a new one."));
 
@@ -112,11 +130,17 @@ public class PasswordResetService {
                         "This password reset link is not valid. Please request a new one."));
 
         customer.changePassword(passwordHasher.hash(newPassword), now);
-        customerRepository.save(customer);
-        tokenRepository.consume(stored.id(), now);
-        tokenRepository.consumeAllForCustomer(stored.customerId(), now);
 
-        int revoked = authenticationService.revokeAllSessions(customer.id());
+        // One unit: the new password, the token consumption and the session revocation. Committing
+        // the password without consuming the token would leave the same link usable again, and
+        // leaving old sessions alive would defeat the point of the reset.
+        int revoked = transactionRunner.execute(() -> {
+            customerRepository.save(customer);
+            tokenRepository.consume(stored.id(), now);
+            tokenRepository.consumeAllForCustomer(stored.customerId(), now);
+            return authenticationService.revokeAllSessions(customer.id());
+        });
+
         notifications.passwordChanged(customer.contact().email().value(), customer.contact().fullName());
         auditLog.record("CUSTOMER", customer.id().toString(), "PASSWORD_RESET_COMPLETED", "CUSTOMER",
                 customer.id().toString(), "SUCCESS", "sessionsRevoked=" + revoked, null);

@@ -10,12 +10,12 @@ import java.util.List;
  * reset: old hashes keep working, and each user is transparently upgraded on their next successful
  * login because {@link #needsRehash} reports the old format.
  */
-public class DelegatingPasswordHasher implements PasswordHasher {
+public class DelegatingPasswordHasher implements com.choco.core.port.PasswordHasher {
 
-    private final PasswordHasher preferred;
-    private final List<PasswordHasher> candidates;
+    private final com.choco.core.port.PasswordHasher preferred;
+    private final List<com.choco.core.port.PasswordHasher> candidates;
 
-    public DelegatingPasswordHasher(PasswordHasher preferred, List<PasswordHasher> candidates) {
+    public DelegatingPasswordHasher(com.choco.core.port.PasswordHasher preferred, List<com.choco.core.port.PasswordHasher> candidates) {
         this.preferred = preferred;
         this.candidates = List.copyOf(candidates);
     }
@@ -27,7 +27,7 @@ public class DelegatingPasswordHasher implements PasswordHasher {
 
     @Override
     public boolean matches(String rawPassword, String encodedHash) {
-        for (PasswordHasher candidate : candidates) {
+        for (com.choco.core.port.PasswordHasher candidate : candidates) {
             if (candidate.matches(rawPassword, encodedHash)) {
                 return true;
             }

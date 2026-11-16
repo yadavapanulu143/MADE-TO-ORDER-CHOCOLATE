@@ -20,8 +20,8 @@ import com.choco.identity.domain.otp.OtpChallenge;
 import com.choco.identity.domain.port.CustomerRepository;
 import com.choco.identity.domain.port.OtpChallengeRepository;
 import com.choco.identity.domain.port.OtpCodeService;
-import com.choco.identity.domain.port.PasswordHasher;
-import com.choco.identity.domain.port.PasswordPolicyPort;
+import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.PasswordPolicy;
 import java.time.Instant;
 import java.util.List;
 
@@ -42,7 +42,7 @@ public class RegistrationService {
     private final CustomerRepository customerRepository;
     private final OtpChallengeRepository otpChallengeRepository;
     private final PasswordHasher passwordHasher;
-    private final PasswordPolicyPort passwordPolicy;
+    private final PasswordPolicy passwordPolicy;
     private final OtpCodeService otpCodeService;
     private final OtpDeliveryPort otpDelivery;
     private final AccountNotificationPort notifications;
@@ -54,7 +54,7 @@ public class RegistrationService {
     public RegistrationService(CustomerRepository customerRepository,
                                OtpChallengeRepository otpChallengeRepository,
                                PasswordHasher passwordHasher,
-                               PasswordPolicyPort passwordPolicy,
+                               PasswordPolicy passwordPolicy,
                                OtpCodeService otpCodeService,
                                OtpDeliveryPort otpDelivery,
                                AccountNotificationPort notifications,

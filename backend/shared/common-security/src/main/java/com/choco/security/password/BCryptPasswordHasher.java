@@ -10,7 +10,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
  * brute force expensive, yet still acceptable for interactive login. Because a single login costs
  * about a second of CPU, this algorithm is a fallback, not the default.
  */
-public class BCryptPasswordHasher implements PasswordHasher {
+public class BCryptPasswordHasher implements com.choco.core.port.PasswordHasher {
 
     public static final int COST_FACTOR = 15;
 

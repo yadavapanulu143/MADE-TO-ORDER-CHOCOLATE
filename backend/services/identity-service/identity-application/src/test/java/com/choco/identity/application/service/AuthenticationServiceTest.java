@@ -15,7 +15,7 @@ import com.choco.identity.application.port.TokenService;
 import com.choco.identity.domain.customer.ContactDetails;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
-import com.choco.identity.domain.port.PasswordHasher;
+import com.choco.core.port.PasswordHasher;
 import com.choco.security.principal.AuthenticatedUser;
 import com.choco.test.Fakes;
 import java.time.Instant;

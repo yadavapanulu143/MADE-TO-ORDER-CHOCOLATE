@@ -10,8 +10,8 @@ import com.choco.identity.application.port.AccountNotificationPort;
 import com.choco.identity.application.port.AuditLogPort;
 import com.choco.identity.application.port.PasswordResetTokenRepository;
 import com.choco.identity.domain.port.CustomerRepository;
-import com.choco.identity.domain.port.PasswordHasher;
-import com.choco.identity.domain.port.PasswordPolicyPort;
+import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.PasswordPolicy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -34,7 +34,7 @@ public class PasswordResetService {
     private final CustomerRepository customerRepository;
     private final PasswordResetTokenRepository tokenRepository;
     private final PasswordHasher passwordHasher;
-    private final PasswordPolicyPort passwordPolicy;
+    private final PasswordPolicy passwordPolicy;
     private final AccountNotificationPort notifications;
     private final AuditLogPort auditLog;
     private final AuthenticationService authenticationService;
@@ -44,7 +44,7 @@ public class PasswordResetService {
     public PasswordResetService(CustomerRepository customerRepository,
                                 PasswordResetTokenRepository tokenRepository,
                                 PasswordHasher passwordHasher,
-                                PasswordPolicyPort passwordPolicy,
+                                PasswordPolicy passwordPolicy,
                                 AccountNotificationPort notifications,
                                 AuditLogPort auditLog,
                                 AuthenticationService authenticationService,

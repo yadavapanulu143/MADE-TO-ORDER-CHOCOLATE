@@ -16,7 +16,7 @@ public final class PasswordHasherFactory {
     private PasswordHasherFactory() {
     }
 
-    public static PasswordHasher create(String algorithm) {
+    public static com.choco.core.port.PasswordHasher create(String algorithm) {
         if (algorithm == null) {
             return new Argon2PasswordHasher();
         }

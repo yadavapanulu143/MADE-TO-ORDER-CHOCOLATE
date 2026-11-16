@@ -15,7 +15,7 @@ import de.mkammerer.argon2.Argon2Factory;
  * of parallelism. Peak memory is therefore about 19 MiB per concurrent hash, which is the figure to
  * size the container heap against.
  */
-public class Argon2PasswordHasher implements PasswordHasher {
+public class Argon2PasswordHasher implements com.choco.core.port.PasswordHasher {
 
     static final int SALT_LENGTH = 16;
     static final int HASH_LENGTH = 32;

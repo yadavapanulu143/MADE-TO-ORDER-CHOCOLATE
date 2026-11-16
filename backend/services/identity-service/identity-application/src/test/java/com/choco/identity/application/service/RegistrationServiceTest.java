@@ -38,7 +38,7 @@ class RegistrationServiceTest {
 
         // A deterministic hasher: the real Argon2id cost is irrelevant to these assertions and
         // would only slow the suite down. The real algorithm is tested in common-security.
-        var hasher = new com.choco.identity.domain.port.PasswordHasher() {
+        var hasher = new com.choco.core.port.PasswordHasher() {
             @Override
             public String hash(String rawPassword) {
                 return "hashed:" + rawPassword;
@@ -54,7 +54,7 @@ class RegistrationServiceTest {
                 return false;
             }
         };
-        var policy = new com.choco.identity.domain.port.PasswordPolicyPort() {
+        var policy = new com.choco.core.port.PasswordPolicy() {
             @Override
             public List<String> violations(String rawPassword) {
                 return rawPassword != null && rawPassword.length() >= 12 ? List.of() : List.of("too short");

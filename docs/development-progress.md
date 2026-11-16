@@ -1,0 +1,200 @@
+# Development Progress Checklist
+
+Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
+A phase is only marked DONE when its tests run green and the behaviour has been verified.
+
+---
+
+## Phase 1 — Project foundation
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1.1 | Monorepo structure | DONE | `backend/`, `frontend/`, `infra/`, `docs/` |
+| 1.2 | Toolchain provisioned | DONE | JDK 21.0.13, Maven 3.9.9, Node 24, Docker 29.9.3 |
+| 1.3 | Parent POM with pinned versions | DONE | `backend/pom.xml` — Boot 3.5.16, Cloud 2025.0.3 |
+| 1.4 | `common-core` (framework-free domain primitives) | DONE | 26 tests green |
+| 1.5 | `common-web` (RFC 9457 errors, correlation ids, OpenAPI) | DONE | 7 tests green |
+| 1.6 | `common-security` (Argon2id/BCrypt-15, JWT, RBAC) | DONE | 23 tests green |
+| 1.7 | `common-events` (envelope, transactional outbox, RabbitMQ) | DONE | 6 tests green |
+| 1.8 | `common-test` (Testcontainers bases, fakes) | DONE | Compiles, installed |
+| 1.9 | Clean Architecture enforced by build | DONE | Enforcer rule proven to fail on a Spring dependency |
+| 1.10 | Docker Compose infra stack | DONE | 8 containers verified healthy |
+| 1.11 | Per-service PostgreSQL databases + roles | DONE | 7 DBs, 7 roles created |
+| 1.12 | **Cross-service DB isolation** | DONE | `permission denied for database "choco_identity"` verified |
+| 1.13 | `.env.example` (no real secrets) | DONE | Committed; `.env` gitignored |
+| 1.14 | Observability stack | DONE | Prometheus/Grafana/Loki/Tempo all verified responding |
+| 1.15 | Documentation | DONE | `docs/architecture.md`, `docs/local-development.md`, this file |
+
+---
+
+## Phase 2 — Backend foundation
+
+| # | Requirement | Status |
+|---|---|---|
+| 2.1 | Service module skeleton (5-module Clean Architecture each) | TODO |
+| 2.2 | API Gateway routing | TODO |
+| 2.3 | Flyway migrations per service | TODO |
+| 2.4 | Redis integration (cache, rate limiting) | TODO |
+| 2.5 | Inter-service REST client with timeouts/retries | TODO |
+| 2.6 | Health checks + readiness probes | TODO |
+
+## Phase 3 — Authentication and security
+
+| # | Requirement | Status |
+|---|---|---|
+| 3.1 | Customer registration (name, email, mobile, password) | TODO |
+| 3.2 | Email OTP verification | TODO |
+| 3.3 | Mobile OTP verification | TODO |
+| 3.4 | OTP expiry, resend limits, max attempts | TODO |
+| 3.5 | Login / logout | TODO |
+| 3.6 | Password reset | TODO |
+| 3.7 | Argon2id hashing (BCrypt-15 fallback) | TODO |
+| 3.8 | Admin authentication | TODO |
+| 3.9 | Role-based authorization | TODO |
+| 3.10 | Login rate limiting / brute-force protection | TODO |
+
+## Phase 4 — Customer and product management
+
+| # | Requirement | Status |
+|---|---|---|
+| 4.1 | Customer profile view/update | TODO |
+| 4.2 | Delivery address management | TODO |
+| 4.3 | Verification status display | TODO |
+| 4.4 | Product catalogue (multi-product ready) | TODO |
+| 4.5 | Product images | TODO |
+| 4.6 | Pricing + variants/sizes | TODO |
+| 4.7 | Admin product management | TODO |
+
+## Phase 5 — Shopping and orders
+
+| # | Requirement | Status |
+|---|---|---|
+| 5.1 | Shopping cart | TODO |
+| 5.2 | Quantity management + configurable limits | TODO |
+| 5.3 | Checkout validation (availability, quantity, verification, address, PIN) | TODO |
+| 5.4 | Order creation with immutable price snapshot | TODO |
+| 5.5 | Order history (own orders only) | TODO |
+| 5.6 | Order status transitions + history | TODO |
+
+## Phase 6 — Razorpay integration
+
+| # | Requirement | Status |
+|---|---|---|
+| 6.1 | Razorpay order creation | TODO |
+| 6.2 | Payment initiation | TODO |
+| 6.3 | Signature verification (backend only) | TODO |
+| 6.4 | Webhook signature verification | TODO |
+| 6.5 | Idempotent payment processing | TODO |
+| 6.6 | Duplicate event protection | TODO |
+| 6.7 | Payment success/failure/pending handling | TODO |
+| 6.8 | Payment transaction history | TODO |
+| 6.9 | Refunds and disputes | TODO |
+
+## Phase 7 — Made-to-order production
+
+| # | Requirement | Status |
+|---|---|---|
+| 7.1 | Preparation queue from confirmed orders | TODO |
+| 7.2 | Production statuses (Received→Awaiting→Started→Completed→Packaging→Ready) | TODO |
+| 7.3 | Production notes | TODO |
+| 7.4 | Optional ingredient/raw-material inventory | TODO |
+| 7.5 | Low-stock alerts | TODO |
+| 7.6 | Concurrent order handling | TODO |
+
+## Phase 8 — Seller-managed delivery
+
+| # | Requirement | Status |
+|---|---|---|
+| 8.1 | Serviceable PIN-code management | TODO |
+| 8.2 | Configurable delivery charges | TODO |
+| 8.3 | Delivery assignment | TODO |
+| 8.4 | Delivery workflow (10 states) | TODO |
+| 8.5 | Delivery attempts + failure reasons | TODO |
+| 8.6 | Customer delivery tracking | TODO |
+| 8.7 | No fabricated GPS/courier data | TODO |
+
+## Phase 9 — Admin dashboard
+
+| # | Requirement | Status |
+|---|---|---|
+| 9.1 | Dashboard cards (sales, orders, pending, etc.) | TODO |
+| 9.2 | Customer management + search | TODO |
+| 9.3 | **Customer CSV export** | TODO |
+| 9.4 | **Customer XLSX export** | TODO |
+| 9.5 | Export authorization + audit trail | TODO |
+| 9.6 | Product management | TODO |
+| 9.7 | Production management | TODO |
+| 9.8 | Order management | TODO |
+| 9.9 | Payment management | TODO |
+| 9.10 | Delivery management | TODO |
+| 9.11 | Invoice generation/download | TODO |
+| 9.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | TODO |
+| 9.13 | Website settings | TODO |
+
+## Phase 10 — Notifications
+
+| # | Requirement | Status |
+|---|---|---|
+| 10.1 | Email provider (configurable) | TODO |
+| 10.2 | SMS provider (configurable) | TODO |
+| 10.3 | Registration/verification notifications | TODO |
+| 10.4 | Order + payment notifications | TODO |
+| 10.5 | Production + delivery notifications | TODO |
+| 10.6 | Cancellation/refund notifications | TODO |
+
+## Phase 11 — Testing and quality
+
+| # | Requirement | Status |
+|---|---|---|
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (62 green so far) |
+| 11.2 | Integration tests (Testcontainers) | TODO |
+| 11.3 | End-to-end workflows | TODO |
+| 11.4 | Concurrent order processing test | TODO |
+| 11.5 | Payment verification test | TODO |
+| 11.6 | Data privacy / export test | TODO |
+| 11.7 | Security tests | TODO |
+
+## Phase 12 — Deployment preparation
+
+| # | Requirement | Status |
+|---|---|---|
+| 12.1 | Docker Compose (full app) | IN PROGRESS (infra done) |
+| 12.2 | Service Dockerfiles | TODO |
+| 12.3 | GitHub Actions CI/CD | TODO |
+| 12.4 | Kubernetes-ready manifests | TODO |
+| 12.5 | Monitoring dashboards | TODO |
+| 12.6 | Centralized logging | TODO |
+| 12.7 | Distributed tracing | TODO |
+| 12.8 | Deployment documentation | TODO |
+
+---
+
+## Mandatory quality requirements
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Never store passwords in plaintext | DONE | Argon2id/BCrypt tests assert hash ≠ plaintext |
+| Argon2id or BCrypt cost 15 | DONE | Tests assert `$argon2id$` and `$2a$15$` |
+| Never expose password hashes | DONE | `AuthenticatedUser` carries no credential field |
+| No auth secrets in exports | TODO | Enforced in Phase 9 export |
+| Verify Razorpay on backend | TODO | Phase 6 |
+| Never trust frontend payment response | TODO | Phase 6 |
+| Prevent duplicate payment processing | TODO | Phase 6 idempotency |
+| Prevent incorrect order/inventory status | TODO | Phase 5/7 state machines |
+| Customers access only own data | DONE | `requireOwnerOrAdmin` + tests |
+| Admin access protected | DONE | RBAC + permission tests |
+| Never hardcode credentials | DONE | `.env.example` only, no values committed |
+| Never fabricate payment/delivery data | DONE | Delivery is manual by design |
+| Error handling and audit logs | IN PROGRESS | Error handling done; audit log in Phase 3 |
+
+---
+
+## Test tally
+
+| Module | Tests | Status |
+|---|---|---|
+| common-core | 26 | green |
+| common-web | 7 | green |
+| common-security | 23 | green |
+| common-events | 6 | green |
+| **Total** | **62** | **green** |

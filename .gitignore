@@ -1,0 +1,37 @@
+# Secrets and local environment
+.env
+.env.local
+*.pem
+*.key
+!src/test/resources/**/*.pem
+
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data
+data/
+logs/
+*.log
+
+# Agent scratch
+.agent_tmp/

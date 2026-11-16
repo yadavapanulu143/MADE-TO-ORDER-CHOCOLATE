@@ -1,0 +1,36 @@
+# Collector pipeline: receive OTLP from the services, batch it, export traces to Tempo.
+# Metrics are scraped by Prometheus from each service's Actuator endpoint, so they are
+# not duplicated here.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 400
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+  telemetry:
+    logs:
+      level: warn

@@ -36,7 +36,6 @@ public final class EventTypes {
     // fulfilment-service
     public static final String PRODUCTION_STARTED = "fulfilment.production-started";
     public static final String PRODUCTION_COMPLETED = "fulfilment.production-completed";
-    public static final String PACKAGING_COMPLETED = "fulfilment.packaging-completed";
     public static final String READY_FOR_DISPATCH = "fulfilment.ready-for-dispatch";
     public static final String DELIVERY_ASSIGNED = "fulfilment.delivery-assigned";
     public static final String OUT_FOR_DELIVERY = "fulfilment.out-for-delivery";

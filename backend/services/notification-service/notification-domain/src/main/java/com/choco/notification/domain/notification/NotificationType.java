@@ -15,7 +15,6 @@ package com.choco.notification.domain.notification;
  */
 public enum NotificationType {
 
-    REGISTRATION_CONFIRMATION(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     ORDER_PLACED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     ORDER_CONFIRMED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     ORDER_CANCELLED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
@@ -27,7 +26,6 @@ public enum NotificationType {
     DISPUTE_RAISED(NotificationChannel.EMAIL, RecipientType.ADMIN),
     PRODUCTION_STARTED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     PRODUCTION_COMPLETED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
-    PACKAGING_COMPLETED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     READY_FOR_DISPATCH(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     DELIVERY_ASSIGNED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     OUT_FOR_DELIVERY(NotificationChannel.SMS, RecipientType.CUSTOMER),

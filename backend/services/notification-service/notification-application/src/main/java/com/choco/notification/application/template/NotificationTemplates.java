@@ -32,20 +32,6 @@ public final class NotificationTemplates {
     }
 
     static {
-        // --- Account ---------------------------------------------------------------------------
-        put(NotificationType.REGISTRATION_CONFIRMATION,
-                "Welcome to " + BRAND,
-                """
-                Hi {{customerName}},
-
-                Welcome to %s. Your account is now verified and ready to use.
-
-                You can browse our made-to-order chocolates, place an order, and follow your order
-                through preparation and delivery from your account.
-
-                Thank you for choosing us.
-                """.formatted(BRAND));
-
         // --- Order -----------------------------------------------------------------------------
         put(NotificationType.ORDER_PLACED,
                 "We received your order {{orderNumber}}",
@@ -172,22 +158,12 @@ public final class NotificationTemplates {
                 packing them for dispatch.
                 """);
 
-        put(NotificationType.PACKAGING_COMPLETED,
-                "Order {{orderNumber}} is packed",
-                """
-                Hi {{customerName}},
-
-                Your order {{orderNumber}} has been packed and is ready for dispatch.
-
-                We will let you know once it is on its way.
-                """);
-
         put(NotificationType.READY_FOR_DISPATCH,
                 "Order {{orderNumber}} is ready for dispatch",
                 """
                 Hi {{customerName}},
 
-                Your order {{orderNumber}} is packed and ready for dispatch. We will assign it for
+                Your order {{orderNumber}} has been packed and is ready for dispatch. We will assign it for
                 delivery shortly.
                 """);
 

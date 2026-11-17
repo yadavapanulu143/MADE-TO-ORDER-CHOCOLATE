@@ -134,6 +134,78 @@ class NotificationJourneyIT extends AbstractNotificationIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("a low-stock event reaches the seller with the real figures, not a placeholder")
+    void lowStockAlertReachesTheSeller() throws Exception {
+        // The fulfilment service carries the level and the minimum as thousandths of the ingredient's
+        // unit. A listener that read the wrong field names would send a message with the fallback text
+        // and no numbers at all — a defect no unit test of the template would catch, because the
+        // template renders perfectly with whatever map it is handed.
+        publish(EventTypes.LOW_STOCK_DETECTED, "ingredient-1", Map.of(
+                "ingredientId", "ingredient-1",
+                "ingredientName", "Cocoa butter",
+                "unit", "g",
+                "onHandMilliUnits", 250_000L,
+                "minimumMilliUnits", 500_000L));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var messages = GREEN_MAIL.getReceivedMessages();
+            assertThat(messages).isNotEmpty();
+            var message = messages[messages.length - 1];
+            assertThat(message.getAllRecipients()[0].toString()).isEqualTo("seller@choco.test");
+            assertThat(message.getSubject()).contains("Cocoa butter");
+            assertThat(messageText(message))
+                    .as("the seller must see the real level and threshold, not a placeholder")
+                    .contains("250 g")
+                    .contains("500 g");
+        });
+    }
+
+    @Test
+    @DisplayName("a delivery-assigned event reaches the customer")
+    void deliveryAssignedReachesTheCustomer() throws Exception {
+        registerCustomer();
+
+        publish(EventTypes.DELIVERY_ASSIGNED, "order-9", Map.of(
+                "orderId", "order-9",
+                "orderNumber", "CHOCO-2026001-9",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-9",
+                "deliveryPersonName", "Ravi"));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var messages = GREEN_MAIL.getReceivedMessages();
+            assertThat(messages).isNotEmpty();
+            assertThat(messages[messages.length - 1].getAllRecipients()[0].toString())
+                    .isEqualTo("asha@example.com");
+            assertThat(messages[messages.length - 1].getSubject()).contains("CHOCO-2026001-9");
+        });
+    }
+
+    @Test
+    @DisplayName("a failed delivery tells the customer why, using the reason the event carries")
+    void failedDeliveryCarriesTheReason() throws Exception {
+        registerCustomer();
+
+        // The fulfilment event carries the reason as failureReason. A listener that read "reason"
+        // would send the generic fallback and the customer would never learn what happened.
+        publish(EventTypes.DELIVERY_FAILED, "order-10", Map.of(
+                "orderId", "order-10",
+                "orderNumber", "CHOCO-2026001-10",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-10",
+                "failureReason", "nobody was home to receive it",
+                "attemptNumber", 1));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var messages = GREEN_MAIL.getReceivedMessages();
+            assertThat(messages).isNotEmpty();
+            assertThat(messageText(messages[messages.length - 1]))
+                    .as("the customer must see the actual failure reason")
+                    .contains("nobody was home to receive it");
+        });
+    }
+
     // --- helpers -------------------------------------------------------------------------------
 
     /** Flattens a multipart message to its text, so the assertion is on the content, not the envelope. */

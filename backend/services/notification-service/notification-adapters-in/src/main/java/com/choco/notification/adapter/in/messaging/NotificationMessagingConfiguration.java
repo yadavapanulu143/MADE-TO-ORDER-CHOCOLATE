@@ -149,12 +149,6 @@ class NotificationMessagingConfiguration {
     }
 
     @Bean
-    Binding packagingCompletedBinding(Queue notificationEventsQueue, TopicExchange chocoEventsExchange) {
-        return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
-                .with(EventTypes.PACKAGING_COMPLETED);
-    }
-
-    @Bean
     Binding readyForDispatchBinding(Queue notificationEventsQueue, TopicExchange chocoEventsExchange) {
         return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
                 .with(EventTypes.READY_FOR_DISPATCH);

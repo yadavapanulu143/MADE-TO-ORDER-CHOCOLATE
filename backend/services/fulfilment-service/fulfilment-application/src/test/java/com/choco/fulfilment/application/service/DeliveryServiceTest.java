@@ -122,6 +122,19 @@ class DeliveryServiceTest {
             assertThat(view.status()).isEqualTo(DeliveryStatus.ASSIGNED.name());
             assertThat(view.deliveryPersonName()).isEqualTo("Ravi");
             assertThat(audit.hasAction("delivery.assign")).isTrue();
+            // The customer is told a delivery has been arranged, so the assignment must reach the bus.
+            assertThat(events.eventsOfType("fulfilment.delivery-assigned")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a re-assignment before dispatch raises no further event")
+        void reassignmentRaisesNoFurtherEvent() {
+            openDelivery();
+            service.assign(ADMIN, new DeliveryAssignCommand(UUID.fromString(ORDER), "Ravi", null));
+            service.assign(ADMIN, new DeliveryAssignCommand(UUID.fromString(ORDER), "Sita", null));
+
+            // Only the first assignment is news; swapping the seller's own staff is not.
+            assertThat(events.eventsOfType("fulfilment.delivery-assigned")).hasSize(1);
         }
 
         @Test

@@ -416,9 +416,9 @@ gateway.
 |---|---|---|
 | 10.1 | Email provider (configurable) | DONE — SMTP sender, host/port/credentials from environment; a test sink stands in for a provider |
 | 10.2 | SMS provider (configurable) | DONE — HTTP gateway sender; with no gateway URL configured, sends are logged and reported, never fabricated |
-| 10.3 | Registration/verification notifications | DONE — `customer.registered` (greeting) and `customer.verified`; a contact change re-issues the greeting |
+| 10.3 | Registration/verification notifications | DONE — the identity service sends the OTP and welcome mail directly; the notification service consumes `customer.registered`/`customer.verified`/`customer.contact-changed` to keep its contact projection current, so later messages greet the customer by name |
 | 10.4 | Order + payment notifications | DONE — `order.placed`, `order.confirmed`, `order.cancelled`, `payment.captured`, `payment.failed`, `payment.pending` |
-| 10.5 | Production + delivery notifications | DONE — `production.started/completed`, `packaging.completed`, `ready-for-dispatch`, `delivery.assigned/out-for-delivery/delivered/failed` |
+| 10.5 | Production + delivery notifications | DONE — `production.started/completed`, `ready-for-dispatch`, `delivery.assigned/out-for-delivery/delivered/failed`. `fulfilment.delivery-assigned` is now actually raised: the fulfilment service's `Delivery.assign` drains the aggregate's events on the first `PENDING → ASSIGNED` edge, so the customer is told a delivery has been arranged. (A `packaging.completed` subscription was removed: the packaging transition raises no event, so the binding could never fire.) |
 | 10.6 | Cancellation/refund notifications | DONE — `refund.requested` and `dispute.raised` to the seller; `refund.processed` to the customer |
 | 10.7 | Configurable templates and provider configuration | DONE — templates in the application layer; provider settings from environment variables |
 | 10.8 | Delivery status tracking | DONE — every notification's status and attempt count is visible in the admin log |
@@ -433,7 +433,7 @@ gateway.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 5 | Flyway applied V1; Hibernate `validate` matches; a negative attempt count, a blank dedupe key and an out-of-range status are rejected, and a duplicate dedupe key is refused by the unique index |
-| NotificationJourneyIT | 4 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, and a provider outage is recorded rather than thrown |
+| NotificationJourneyIT | 7 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, and a failed delivery carries the reason the event gave |
 | AdminNotificationApiIT | 7 | The admin log over real HTTP: list, counters and read are permission gated; a customer is refused; an unknown id is a 404; a delivered notification cannot be resent (409); a customer cannot trigger a resend (403) |
 | CleanArchitectureTest | 4 | The domain and application layers depend on no framework, adapter or provider SDK; the mail/SMS sender never leaks into the domain |
 
@@ -512,26 +512,25 @@ gateway.
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 15 | 32 | 47 |
-| fulfilment-domain | 86 | – | 86 |
-| fulfilment-application | 36 | – | 36 |
-| fulfilment-app | 4 | 23 | 27 |
+| gateway | 15 | 34 | 49 |
+| fulfilment-domain | 88 | – | 88 |
+| fulfilment-application | 37 | – | 37 |
+| fulfilment-app | 4 | 24 | 28 |
 | notification-domain | 13 | – | 13 |
-| notification-application | 35 | – | 35 |
-| notification-app | 4 | 16 | 20 |
-| **Total** | **821** | **216** | **1037** |
+| notification-application | 33 | – | 33 |
+| notification-app | 4 | 19 | 23 |
+| **Total** | **822** | **222** | **1044** |
 
-Counts come from `mvn clean verify` at `backend/` plus the two gateway tests added with the
-admin-refresh route fix; every suite reported 0 failures, 0 errors, 0 skipped. Treat this as a map of
-where the tests are, not a number to keep in sync by hand. Tally from each module's `Results:` block:
-a nested `@Nested` class writes its own report file, so summing report files undercounts and a naive
-per-file sum is not the total.
+Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
+skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
+each module's `Results:` block: a nested `@Nested` class writes its own report file, so summing report
+files undercounts and a naive per-file sum is not the total.
 
 ### API Gateway integration tests (`mvn verify`)
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 17 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token |
+| RoutingIT | 19 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment and notification surfaces reach their services with a token and are refused without one |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |

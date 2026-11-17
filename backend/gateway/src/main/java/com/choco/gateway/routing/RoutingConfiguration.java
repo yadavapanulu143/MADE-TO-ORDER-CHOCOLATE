@@ -71,7 +71,7 @@ public class RoutingConfiguration {
     @Bean
     RouterFunction<ServerResponse> paymentRoutes(GatewayProperties properties) {
         return serviceRoute(properties, "payment",
-                "/api/v1/payments/**", "/api/v1/webhooks/**");
+                "/api/v1/payments/**", "/api/v1/webhooks/**", "/api/v1/admin/payments/**");
     }
 
     @Bean

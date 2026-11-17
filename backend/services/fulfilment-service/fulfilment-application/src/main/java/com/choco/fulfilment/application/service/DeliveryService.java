@@ -147,6 +147,10 @@ public class DeliveryService {
             Delivery delivery = requireByOrder(command.orderId());
             delivery.assign(command.deliveryPersonName(), command.deliveryPersonPhone(), adminId, clock.now());
             Delivery saved = deliveryRepository.save(delivery);
+            // The first assignment raises DeliveryAssigned; without draining it here the customer is
+            // never told a delivery has been arranged, because this is the only place the event can
+            // leave the aggregate.
+            eventPublisher.publishAll(delivery.pullDomainEvents());
             audit(adminId, "delivery.assign", TARGET_DELIVERY, saved.id().toString(), "SUCCESS",
                     command.deliveryPersonName());
             return FulfilmentViewMapper.toView(saved);

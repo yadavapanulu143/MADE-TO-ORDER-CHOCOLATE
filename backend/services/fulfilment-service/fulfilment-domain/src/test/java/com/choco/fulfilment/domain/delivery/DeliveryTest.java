@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.choco.core.error.BusinessRuleException;
+import com.choco.fulfilment.domain.event.DeliveryAssigned;
 import com.choco.fulfilment.domain.event.DeliveryDelivered;
 import com.choco.fulfilment.domain.event.DeliveryFailed;
 import com.choco.fulfilment.domain.event.OutForDelivery;
@@ -33,6 +34,26 @@ class DeliveryTest {
         assertThat(delivery.status()).isEqualTo(DeliveryStatus.ASSIGNED);
         assertThat(delivery.deliveryPersonName()).isEqualTo("Ravi");
         assertThat(delivery.dispatchedAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("the first assignment raises a delivery-assigned event the customer is told about")
+    void firstAssignmentRaisesAnEvent() {
+        Delivery delivery = DeliveryTestSupport.openDelivery();
+        delivery.assign("Ravi", "9000000000", "seller", DeliveryTestSupport.LATER);
+
+        assertThat(delivery.peekDomainEvents()).hasAtLeastOneElementOfType(DeliveryAssigned.class);
+    }
+
+    @Test
+    @DisplayName("a re-assignment before dispatch raises no further event")
+    void reassignmentRaisesNothing() {
+        Delivery delivery = DeliveryTestSupport.assignedDelivery();
+        delivery.assign("Sita", "9111111111", "seller", DeliveryTestSupport.LATER);
+
+        // The delivery person is the seller's own staff and the customer never deals with them, so
+        // swapping one for another is a roster change, not news the customer needs.
+        assertThat(delivery.peekDomainEvents()).isEmpty();
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.choco.fulfilment.it;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.choco.events.config.RabbitTopology;
 import com.choco.events.envelope.EventEnvelope;
@@ -16,7 +17,12 @@ import org.awaitility.Awaitility;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.MessageDeliveryMode;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -43,6 +49,12 @@ class FulfilmentJourneyIT extends AbstractFulfilmentIntegrationTest {
 
     @Autowired
     private RabbitTemplate rabbitTemplate;
+
+    @Autowired
+    private RabbitAdmin rabbitAdmin;
+
+    @Autowired
+    private TopicExchange chocoEventsExchange;
 
     /** Publishes the same envelope the order service's outbox would, so the listener sees the real wire. */
     private void publishOrderConfirmed(String orderId, int quantity) {
@@ -174,6 +186,36 @@ class FulfilmentJourneyIT extends AbstractFulfilmentIntegrationTest {
         }
 
         @Test
+        @DisplayName("assigning the delivery publishes a delivery-assigned event the customer is told about")
+        void assigningPublishesAnEvent() {
+            String orderId = UUID.randomUUID().toString();
+            publishOrderConfirmed(orderId, 1);
+            JsonNode jobs = awaitJobsFor(orderId, adminToken(ADMIN_ID), 1);
+            String jobId = jobs.get(0).get("id").asText();
+            String token = adminToken(ADMIN_ID);
+
+            for (String action : List.of("ACKNOWLEDGE", "START", "COMPLETE", "PACKAGING",
+                    "READY_FOR_DISPATCH")) {
+                post("/api/v1/admin/fulfilment/production/jobs/" + jobId + "/progress",
+                        jsonBody(Map.of("action", action)), token);
+            }
+
+            HttpResponse<String> assigned = post(
+                    "/api/v1/admin/fulfilment/deliveries/orders/" + orderId + "/assign",
+                    jsonBody(Map.of("deliveryPersonName", "Ravi", "deliveryPersonPhone", "9000000000")),
+                    token);
+            assertThat(assigned.statusCode()).isEqualTo(200);
+            assertThat(json(assigned).get("status").asText()).isEqualTo("ASSIGNED");
+
+            // The whole point of the assignment is that the customer is told. The use case must drain
+            // the aggregate's event and the outbox relay must carry it to the broker; asserting only on
+            // the HTTP response would miss an assignment that is saved but never announced.
+            assertThat(receiveEvent(EventTypes.DELIVERY_ASSIGNED, orderId))
+                    .as("the delivery-assigned event must reach the broker")
+                    .isTrue();
+        }
+
+        @Test
         @DisplayName("an illegal preparation jump is refused with a 4xx, not silently applied")
         void illegalJumpIsRefused() {
             String orderId = UUID.randomUUID().toString();
@@ -297,6 +339,35 @@ class FulfilmentJourneyIT extends AbstractFulfilmentIntegrationTest {
             JsonNode quote = json(get("/api/v1/serviceability/560001", customerToken(CUSTOMER_ID)));
             assertThat(quote.get("serviceable").asBoolean()).isTrue();
             assertThat(quote.get("deliveryChargeMinorUnits").asLong()).isEqualTo(4900);
+        }
+    }
+
+    /**
+     * Waits for an event of the given type for the given aggregate to appear on the broker.
+     *
+     * <p>A throwaway queue is bound to the event's routing key and the raw body is read, exactly as
+     * {@code OutboxRelayIT} does in the identity suite. This proves the event left the service — the
+     * exact seam a use case that saves an aggregate but never drains its domain events would leave
+     * broken — rather than only that the HTTP call returned 200.
+     */
+    private boolean receiveEvent(String eventType, String aggregateId) {
+        Queue queue = QueueBuilder.nonDurable("it." + UUID.randomUUID()).exclusive().autoDelete().build();
+        rabbitAdmin.declareQueue(queue);
+        rabbitAdmin.declareBinding(BindingBuilder.bind(queue).to(chocoEventsExchange).with(eventType));
+        try {
+            org.springframework.amqp.core.Message message = Awaitility.await()
+                    .atMost(Duration.ofSeconds(20))
+                    .pollInterval(Duration.ofMillis(200))
+                    .until(() -> rabbitTemplate.receive(queue.getName()), value -> value != null);
+            if (message == null) {
+                return false;
+            }
+            String body = new String(message.getBody(), java.nio.charset.StandardCharsets.UTF_8);
+            return body.contains(aggregateId);
+        } catch (org.awaitility.core.ConditionTimeoutException timedOut) {
+            return false;
+        } finally {
+            rabbitAdmin.deleteQueue(queue.getName());
         }
     }
 

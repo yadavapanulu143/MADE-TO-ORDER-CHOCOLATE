@@ -75,8 +75,6 @@ class PlatformEventsListener {
             case EventTypes.PRODUCTION_STARTED -> productionEvent(payload, NotificationType.PRODUCTION_STARTED);
             case EventTypes.PRODUCTION_COMPLETED ->
                     productionEvent(payload, NotificationType.PRODUCTION_COMPLETED);
-            case EventTypes.PACKAGING_COMPLETED ->
-                    productionEvent(payload, NotificationType.PACKAGING_COMPLETED);
             case EventTypes.READY_FOR_DISPATCH ->
                     productionEvent(payload, NotificationType.READY_FOR_DISPATCH);
             case EventTypes.DELIVERY_ASSIGNED -> deliveryEvent(payload, NotificationType.DELIVERY_ASSIGNED);
@@ -192,18 +190,18 @@ class PlatformEventsListener {
     }
 
     private void lowStock(Map<String, Object> payload) {
-        // The ingredient id keys the dedupe, not the crossing time: while an ingredient stays below its
-        // minimum, each further production that touches it must not send another identical alert. A
-        // separate alert goes out only after it is restocked and falls low again, which the id-based key
-        // alone would not allow — so the event carries a crossing id and that is used instead.
+        // The dedupe key is the event id, so a single crossing of the threshold alerts once even if the
+        // event is redelivered, while a later crossing — restocked and low again — alerts again. Keying
+        // on the ingredient id instead would suppress every crossing after the first, silently.
         String ingredientId = str(payload, "ingredientId");
+        String unit = str(payload, "unit");
+        java.util.Map<String, String> variables = new java.util.HashMap<>();
+        variables.put("ingredientName", orDefault(str(payload, "ingredientName"), "An ingredient"));
+        variables.put("onHand", formatStock(lng(payload, "onHandMilliUnits"), unit));
+        variables.put("minimum", formatStock(lng(payload, "minimumMilliUnits"), unit));
         dispatchService.notify(new NotifyCommand(NotificationType.LOW_STOCK_ALERT,
-                dedupe("stock.low", orDefault(str(payload, "alertId"), ingredientId)),
-                ingredientId, null,
-                Map.of(
-                        "ingredientName", orDefault(str(payload, "ingredientName"), "An ingredient"),
-                        "onHand", str(payload, "onHand"),
-                        "minimum", str(payload, "minimum"))));
+                dedupe("stock.low", orDefault(str(payload, "eventId"), ingredientId)),
+                ingredientId, null, variables));
     }
 
     // --- Production and delivery ---------------------------------------------------------------
@@ -221,7 +219,11 @@ class PlatformEventsListener {
         java.util.Map<String, String> variables = new java.util.HashMap<>();
         variables.put("orderNumber", orDefault(str(payload, "orderNumber"), orderId));
         if (type == NotificationType.DELIVERY_FAILED) {
-            variables.put("reason", orDefault(str(payload, "reason"), "The delivery could not be completed"));
+            // The fulfilment service's DeliveryFailed event carries the reason as failureReason; reading
+            // "reason" here would silently fall back to the generic text and the customer would never
+            // learn why the delivery failed.
+            variables.put("reason", orDefault(str(payload, "failureReason"),
+                    "The delivery could not be completed"));
         }
         dispatchService.notify(new NotifyCommand(type,
                 dedupe(type.name(), orDefault(str(payload, "deliveryId"), orderId)),
@@ -274,5 +276,18 @@ class PlatformEventsListener {
 
     private static String orDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    /**
+     * Renders a stock level, carried as thousandths of the ingredient's unit, as a readable figure.
+     *
+     * <p>The seller sees "250 g", not "250000". The unit is free text from the ingredient record (g,
+     * ml, kg, …) and is appended when present; a missing unit still yields the bare number rather than
+     * an error, because an ingredient with no unit is a data-entry gap, not a reason to lose the alert.
+     */
+    private static String formatStock(long milliUnits, String unit) {
+        java.math.BigDecimal units = java.math.BigDecimal.valueOf(milliUnits, 3).stripTrailingZeros();
+        String number = units.toPlainString();
+        return unit == null || unit.isBlank() ? number : number + " " + unit;
     }
 }

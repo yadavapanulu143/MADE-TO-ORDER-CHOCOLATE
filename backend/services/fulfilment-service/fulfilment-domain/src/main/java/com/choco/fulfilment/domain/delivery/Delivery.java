@@ -5,6 +5,7 @@ import com.choco.core.domain.Money;
 import com.choco.core.domain.Pincode;
 import com.choco.core.error.BusinessRuleException;
 import com.choco.core.error.ErrorCode;
+import com.choco.fulfilment.domain.event.DeliveryAssigned;
 import com.choco.fulfilment.domain.event.DeliveryDelivered;
 import com.choco.fulfilment.domain.event.DeliveryFailed;
 import com.choco.fulfilment.domain.event.OutForDelivery;
@@ -114,6 +115,12 @@ public class Delivery extends AggregateRoot {
      * <p>Assignment is not dispatch: the delivery stays {@code ASSIGNED} until the seller records that
      * it actually left. Re-assigning is allowed while the parcel is still with the seller, which is
      * what happens when the first person becomes unavailable.
+     *
+     * <p>The first assignment — the {@code PENDING → ASSIGNED} edge — raises
+     * {@link DeliveryAssigned}, because "a delivery has been arranged for your order" is a fact the
+     * customer is told. A later re-assignment does not: the delivery person is the seller's own staff
+     * and the customer never deals with them, so swapping one for another is a change to the seller's
+     * roster, not news for the customer.
      */
     public void assign(String deliveryPersonName, String deliveryPersonPhone, String actorId, Instant now) {
         String name = requireName(deliveryPersonName);
@@ -121,12 +128,17 @@ public class Delivery extends AggregateRoot {
             throw new BusinessRuleException(ErrorCode.INVALID_STATUS_TRANSITION,
                     "Delivery responsibility can only be assigned before it goes out");
         }
-        if (status == DeliveryStatus.PENDING) {
+        boolean firstAssignment = status == DeliveryStatus.PENDING;
+        if (firstAssignment) {
             moveTo(DeliveryStatus.ASSIGNED, "Assigned to " + name, actorId, now);
         }
         this.deliveryPersonName = name;
         this.deliveryPersonPhone = normalisePhone(deliveryPersonPhone);
         this.updatedAt = now;
+        if (firstAssignment) {
+            registerEvent(new DeliveryAssigned(UUID.randomUUID(), now, id.toString(), orderId.toString(),
+                    orderNumber, customerId.toString(), status.name(), name));
+        }
     }
 
     /** Records that the parcel left the seller for the customer. */

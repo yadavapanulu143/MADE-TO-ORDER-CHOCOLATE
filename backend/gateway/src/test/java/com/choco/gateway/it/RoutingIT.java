@@ -25,6 +25,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     private static final MockWebServer IDENTITY = downstream();
     private static final MockWebServer CATALOG = downstream();
     private static final MockWebServer ORDER = downstream();
+    private static final MockWebServer PAYMENT = downstream();
     private static final MockWebServer FULFILMENT = downstream();
     private static final MockWebServer NOTIFICATION = downstream();
 
@@ -53,6 +54,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         registry.add("choco.gateway.services.identity", () -> IDENTITY.url("/").toString());
         registry.add("choco.gateway.services.catalog", () -> CATALOG.url("/").toString());
         registry.add("choco.gateway.services.order", () -> ORDER.url("/").toString());
+        registry.add("choco.gateway.services.payment", () -> PAYMENT.url("/").toString());
         registry.add("choco.gateway.services.fulfilment", () -> FULFILMENT.url("/").toString());
         registry.add("choco.gateway.services.notification", () -> NOTIFICATION.url("/").toString());
     }
@@ -62,6 +64,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         IDENTITY.shutdown();
         CATALOG.shutdown();
         ORDER.shutdown();
+        PAYMENT.shutdown();
         FULFILMENT.shutdown();
         NOTIFICATION.shutdown();
     }
@@ -230,6 +233,26 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(401);
         // The refusal happens at the edge, so the kitchen surface never sees an unauthenticated read.
         assertThat(FULFILMENT.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("the administrative payment surface reaches the payment service")
+    void adminPaymentsReachPaymentService() {
+        HttpResponse<String> response = get("/api/v1/admin/payments", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/admin/payments");
+    }
+
+    @Test
+    @DisplayName("the administrative payment surface is not public: no token is refused at the edge")
+    void adminPaymentsAreNotPublic() throws Exception {
+        int before = PAYMENT.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/admin/payments", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(PAYMENT.getRequestCount()).isEqualTo(before);
     }
 
     @Test

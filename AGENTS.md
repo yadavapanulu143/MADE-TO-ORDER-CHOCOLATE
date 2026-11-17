@@ -316,6 +316,31 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     signature, a verification over the wrong fields or the wrong secret would still pass, and the bug
     would only appear against the real provider.
 
+39. **An aggregate event that no use case drains is a subscription that can never fire.** The
+    notification service bound `fulfilment.delivery-assigned` and rendered a template for it, but the
+    fulfilment service's `Delivery.assign` saved the delivery and never called
+    `pullDomainEvents()` — so the event stayed in the aggregate and the customer was never told. The
+    binding, the template and the enum all looked correct; only the producer was missing. A domain
+    test that asserts `peekDomainEvents()` proves the event is raised, but only an integration test
+    that reads the broker proves it left the service. Both are needed: the domain test for the edge,
+    the broker test for the drain.
+
+40. **A subscription to an event with no producer is dead weight, not a safety net.** The
+    notification service also bound `fulfilment.packaging-completed`; the packaging transition
+    (`ProductionJob.startPackaging`) raises no event at all, so the binding could never deliver. It
+    was removed rather than given a producer, because `ready-for-dispatch` already carries the
+    customer-facing "your order is packed" fact. Before wiring a consumer to an event, grep for a
+    `registerEvent`/outbox write that actually raises it.
+
+41. **A payload field read by the wrong name fails silently into a fallback.** The notification
+    listener read `reason` from `fulfilment.delivery-failed`, but the event carries `failureReason`;
+    `orDefault` then supplied a generic "the delivery could not be completed" and the customer never
+    learned why. The low-stock handler read `onHand`/`minimum` against `onHandMilliUnits`/
+    `minimumMilliUnits`, and `Map.of` (which rejects nulls) turned the missing fields into a thrown
+    `NullPointerException` that dead-lettered every alert. A consumer that reads JSON by string key
+    has no compiler to catch a rename; the integration test must assert on the rendered value, not
+    only that a message arrived.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:
@@ -493,7 +518,7 @@ each module lands and as the deployment configuration is built.
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1037 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1044 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -520,14 +545,14 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 47 (15 unit + 32 integration: real Redis) |
-| fulfilment-domain | 86 |
-| fulfilment-application | 36 |
-| fulfilment-app | 27 (4 architecture + 23 integration: real PostgreSQL, Redis, RabbitMQ) |
+| gateway | 49 (15 unit + 34 integration: real Redis) |
+| fulfilment-domain | 88 |
+| fulfilment-application | 37 |
+| fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
-| notification-application | 35 |
-| notification-app | 20 (4 architecture + 16 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
-| **total** | **1037** |
+| notification-application | 33 |
+| notification-app | 23 (4 architecture + 19 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| **total** | **1044** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
@@ -635,13 +660,23 @@ to end.
   constraints reject a negative attempt count, a blank dedupe key, an out-of-range status and a
   duplicate dedupe key (the idempotency guard).
 - `NotificationJourneyIT` — a real event on the broker becomes one message in the SMTP sink: the
-  greeting is filled from the contact projection, the dedupe key suppresses a redelivery, and a
-  provider outage is recorded on the notification rather than thrown.
+  greeting is filled from the contact projection, the dedupe key suppresses a redelivery, a provider
+  outage is recorded on the notification rather than thrown, a low-stock alert renders the real level
+  and threshold, an assigned delivery reaches the customer, and a failed delivery carries the reason
+  the event gave (not the generic fallback a wrong field name would produce).
 - `AdminNotificationApiIT` — the admin log over real HTTP: list, counters and read are permission
   gated, a customer is refused, an unknown id is a 404, a delivered notification cannot be resent
   (409) and a customer cannot trigger a resend (403).
 - `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
   provider SDK; the mail/SMS sender never leaks into the domain.
+
+**The fulfilment service raises the delivery events the notification service consumes.**
+`Delivery.assign` drains the aggregate's events on the first `PENDING → ASSIGNED` edge, so
+`fulfilment.delivery-assigned` actually reaches the broker (a later re-assignment raises nothing — the
+delivery person is the seller's own staff). `FulfilmentJourneyIT.assigningPublishesAnEvent` proves it
+end to end by binding a throwaway queue to the exchange and reading the envelope. There is no
+`fulfilment.packaging-completed` event: the packaging transition raises nothing, so no consumer binds
+to it.
 
 **`FAILED` is a resting status.** A notification that exhausts its retry budget stays `FAILED` rather
 than falling back to `PENDING`, so a failure is visible in the admin log and resendable. The retry

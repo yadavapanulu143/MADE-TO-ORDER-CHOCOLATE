@@ -17,10 +17,11 @@ catalog service has integration tests on the same containers: schema/constraint 
 
 ## GitHub push status — RESOLVED
 
-The Phase 4 catalog milestone is pushed. Branch `feature/catalog-service-phase4` at `d5377bf`
-tracks `origin/feature/catalog-service-phase4`; the remote ref matches local `HEAD` exactly.
+Everything is on `main`. The Phase 4 catalog milestone was merged into `main` (PR #2, merge commit
+`3ab3f13`) and every working branch was then deleted, so `main` is the only branch locally and on
+`origin`. Local `main` tracks `origin/main` at the same commit.
 
-A first attempt was refused (`403 Permission ... denied`), the same class of blocker recorded in
+A first push attempt was refused (`403 Permission ... denied`), the same class of blocker recorded in
 earlier sessions: the credential in the environment had **read-only contents** permission for
 `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE` (`POST /git/refs` returned `403 Resource not accessible by
 integration`), even though `$GITHUB_TOKEN` authenticated and the REST API reported

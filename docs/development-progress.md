@@ -40,6 +40,10 @@ If it blocks again: grant the GitHub App `contents: write` on `yadavapanulu143/M
 or supply a user PAT with `repo` scope as `$GITHUB_TOKEN`. No force-push, history rewrite or
 credential handling was performed.
 
+Latest milestone (Phase 5c, order-service persistence and app bootstrap) is pushed to `origin/main`
+at commit `1014bd4`; the remote hash was verified equal to the local hash after the push. The push
+succeeded on the first attempt this session, so no token refresh was needed.
+
 ---
 
 ## Phase 1 — Project foundation

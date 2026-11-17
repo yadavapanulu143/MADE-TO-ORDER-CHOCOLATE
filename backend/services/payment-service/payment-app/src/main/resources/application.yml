@@ -1,0 +1,88 @@
+server:
+  port: 8084
+  shutdown: graceful
+
+spring:
+  application:
+    name: payment-service
+  datasource:
+    url: ${CHOCO_PAYMENT_DB_URL:jdbc:postgresql://localhost:5432/choco_payment}
+    username: ${CHOCO_PAYMENT_DB_USER:choco_payment}
+    password: ${CHOCO_PAYMENT_DB_PASSWORD:choco_payment_pw}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate validates that the entities match it and never alters it:
+      # an automatic schema update in production can drop a column and its data.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        default_batch_fetch_size: 50
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: ${CHOCO_REDIS_HOST:localhost}
+      port: ${CHOCO_REDIS_PORT:6379}
+      password: ${CHOCO_REDIS_PASSWORD:choco_redis_pw}
+      timeout: 2s
+  rabbitmq:
+    host: ${CHOCO_RABBITMQ_HOST:localhost}
+    port: ${CHOCO_RABBITMQ_PORT:5672}
+    username: ${CHOCO_RABBITMQ_USER:choco}
+    password: ${CHOCO_RABBITMQ_PASSWORD:choco_rabbit_pw}
+
+choco:
+  security:
+    issuer: choco-identity
+    # The webhook path is the one deliberate exception: the provider has no bearer token, so the only
+    # thing that can protect it is the signature over the raw body, which the webhook use case checks
+    # before it acts. Every other path requires a token — a payment is the customer's own data, and
+    # the seller's payment surface is role-guarded at the controller.
+    public-paths:
+      - /api/v1/webhooks/**
+    jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+  cors:
+    allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+  payment:
+    razorpay:
+      # The publishable key id. Safe to send to the browser; the checkout needs it.
+      key-id: ${CHOCO_RAZORPAY_KEY_ID:}
+      # The account secret. Used to sign API calls and to verify the checkout signature. Never logged.
+      key-secret: ${CHOCO_RAZORPAY_KEY_SECRET:}
+      # The webhook secret, which is separate from the key secret. Without it, webhooks are refused.
+      webhook-secret: ${CHOCO_RAZORPAY_WEBHOOK_SECRET:}
+      # Real provider calls are opt-in, so a developer never accidentally creates a live order.
+      enabled: ${CHOCO_RAZORPAY_ENABLED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${CHOCO_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${CHOCO_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+logging:
+  level:
+    com.choco: ${CHOCO_LOG_LEVEL:INFO}

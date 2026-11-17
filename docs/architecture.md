@@ -113,6 +113,34 @@ window where a commit fails but the message is already gone. The relay query use
 - **Correlation**: every request gets a `X-Correlation-Id`, validated against a safe pattern so it
   cannot be used for header injection or log forging.
 
+### 6.1 Payment security (Phase 6)
+
+The payment service is the one place where a mistake costs real money, so its security decisions are
+recorded here rather than left to the code.
+
+- **A payment is confirmed by the server, never by the browser.** The checkout redirect only triggers
+  a server-side verification: the checkout signature is checked, then the payment is re-fetched from
+  the provider, and only a captured payment for the expected amount is recorded as paid. A redirect to
+  a success page is not evidence, and a forged one is not either.
+- **Two signatures, both real HMACs.** The checkout signature is verified over `order_id|payment_id`
+  with the account secret; the webhook signature over the raw request body with the separate webhook
+  secret. The body is passed on unchanged, because re-serialising it would change whitespace and key
+  order and every signature would fail. The provider SDK's constant-time comparison is used rather
+  than a hand-rolled one, so a timing side channel cannot forge a signature byte by byte.
+- **No secret, no trust.** When no webhook secret is configured, every webhook is refused. A
+  webhook endpoint is client-reachable and the provider has no bearer token, so accepting an unsigned
+  event would let anyone confirm an order for free.
+- **Idempotent by construction.** One payment per order and one payment per provider order are
+  enforced by unique indexes, not by application code alone. A repeated capture is a no-op in the
+  aggregate, so a retried webhook delivery adds no second attempt and raises no second event.
+- **Nothing sensitive is ever stored.** The schema holds identifiers and a coarse method
+  classification (UPI, CARD, NETBANKING). There is no column for a card number, CVV, UPI PIN or bank
+  credential; the provider's own checkout collects those. The account and webhook secrets are read
+  from the environment and are never logged or returned.
+- **A misconfigured service fails closed.** With no credentials the service still boots but refuses
+  every money-moving call, and never reports a fake success. It does not fall back to a stub that
+  pretends a payment worked.
+
 ## 7. Observability
 
 - **Metrics**: Spring Boot Actuator `/actuator/prometheus`, scraped by Prometheus.

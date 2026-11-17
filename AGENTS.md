@@ -293,6 +293,53 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     idempotent path: a duplicate of the same request is a replay, but a different request that lands in
     the same slot is corruption.
 
+36. **A signature must be verified over the exact bytes the provider signed.** The webhook body is
+    read as a `String` and passed to the verifier unchanged. Re-serialising the parsed JSON — even to
+    the same fields — changes whitespace and key order, so the HMAC never matches and every webhook is
+    rejected while the code looks correct. The checkout signature is over `order_id|payment_id` with
+    the *account* secret; the webhook signature is over the raw body with the *webhook* secret. They
+    are different secrets and swapping them fails silently as "signature invalid".
+
+37. **A signature check proves origin, not settlement.** A valid checkout signature means the response
+    came from the provider; it does not mean the money was captured. The payment is re-fetched from
+    the provider afterwards and only a `captured` status for the expected amount is recorded as paid.
+    The shared `applyReportedState` keeps the browser path and the webhook path from drifting — a
+    test that marks a payment paid from the signature alone would pass and be wrong.
+
+38. **A test that reuses the SDK's own signer cannot catch a wrong-string bug.** The gateway tests
+    compute the expected HMAC independently with `javax.crypto`. If they called the SDK to produce the
+    signature, a verification over the wrong fields or the wrong secret would still pass, and the bug
+    would only appear against the real provider.
+
+## Payment service conventions
+
+The payment service follows the same five-module shape. Things specific to it:
+
+- **A payment is confirmed by the server, never by the browser.** The checkout redirect only triggers
+  a server-side verification: `verifyCheckoutSignature`, then `gateway.fetchPayment`, and only a
+  captured payment for the expected amount becomes `PAID`. A redirect to a success page is not
+  evidence. `PaymentService.applyReportedState` is shared by verification and the webhook so the two
+  paths cannot drift.
+- **The Razorpay SDK lives only in `RazorpayPaymentGateway`.** The domain and application layers
+  depend on the `PaymentGatewayPort` interface, so the rules are testable against a fake and the
+  provider is replaceable. A `CleanArchitectureTest` rule fails the build if `com.razorpay..` or
+  `org.json..` appears anywhere outside `..payment.adapter.out.gateway..`.
+- **Two separate secrets, two separate verifications.** The account secret verifies the checkout
+  signature over `order_id|payment_id`; the webhook secret verifies the raw request body. The body is
+  taken as a `String` and passed on unchanged — re-serialising it changes whitespace and key order and
+  every signature fails. When no webhook secret is configured, every webhook is refused.
+- **Idempotency is enforced by the database, not only by code.** `payments_order_unique` and
+  `payments_provider_payment_unique` make a second payment for one order, or two payments sharing a
+  provider payment id, impossible. A repeated capture is a no-op in the aggregate, so a retried
+  webhook adds no second attempt.
+- **Nothing sensitive is ever stored or logged.** The schema holds identifiers and a coarse
+  `PaymentMethod` (UPI, CARD, NETBANKING) — never a card number, CVV, UPI PIN or bank credential. The
+  key secret and webhook secret come from the environment, are never logged and never returned; only
+  the publishable key id is exposed.
+- **A misconfigured service fails closed.** With no credentials, `UnconfiguredPaymentGateway` still
+  lets the service boot but refuses every money-moving call and never verifies a signature. There is
+  no stub that pretends a payment succeeded.
+
 ## Order service conventions
 
 The order service follows the same five-module shape as identity and catalog. Things specific to it:
@@ -321,7 +368,7 @@ The order service follows the same five-module shape as identity and catalog. Th
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **604 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn verify` at `backend/`: **780 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -342,9 +389,13 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | order-domain | 98 |
 | order-application | 54 |
 | order-adapters-out | 11 (real HTTP server) |
-| order-app | 12 (integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
-| api-gateway | 37 (14 unit + 23 integration: real Redis) |
-| **total** | **604** |
+| order-app | 39 (integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
+| payment-domain | 40 |
+| payment-application | 31 |
+| payment-adapters-out | 18 (real HMAC signature algorithms) |
+| payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
+| api-gateway | 40 (14 unit + 26 integration: real Redis) |
+| **total** | **780** |
 
 An earlier revision of this table claimed 446, counting the gateway's unit tests as 35. That number
 was wrong. `GatewayPropertiesTest` has always held 14 `@Test` methods — 13 when it was first added
@@ -397,6 +448,24 @@ Two things these tests depend on, both deliberate:
 - **The access-token decoder fetches the service's own JWKS** over HTTP, so the base class reserves a
   free port up front and points both `server.port` and `choco.security.jwk-set-uri` at it. A token
   minted by the service is then verified by the same real decoder path production uses.
+
+`payment-app` carries its own integration tests under `src/test/java/com/choco/payment/it`
+(`AbstractPaymentIntegrationTest` starts real PostgreSQL, RabbitMQ and Redis, and serves the service
+on a random port). The one thing stubbed is the provider, because Razorpay cannot be driven
+deterministically from a test — but the stub is a real `PaymentGatewayPort` that computes **real HMAC
+signatures**, so signature verification is exercised for real rather than bypassed. Authentication is
+local: the test supplies its own RSA key and a matching `JwtDecoder`, and mints real RS256 tokens the
+real filter chain verifies.
+
+- `SchemaAndPersistenceIT` — Flyway applied V1, Hibernate `validate` passes, and the database-level
+  constraints reject a second payment for one order, a shared provider order, a non-positive amount,
+  a non-INR currency and an orphan refund.
+- `PaymentJourneyIT` — the full payment journey over real HTTP: initiation and its idempotency, a
+  captured payment with a valid signature, a forged signature refused, a customer unable to verify
+  another's payment, signed/unsigned/duplicate/unknown webhooks, owner-scoped reads, and the seller's
+  counters and refund.
+- `CleanArchitectureTest` — the Razorpay SDK never leaves the gateway adapter; the domain and
+  application layers depend on no framework, adapter or provider SDK.
 
 ## Local dev services
 

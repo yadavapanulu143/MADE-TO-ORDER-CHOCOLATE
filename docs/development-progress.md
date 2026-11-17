@@ -3,9 +3,10 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **604 tests, 0 failures, 0 errors, 0 skipped**
-(Phase 5c: order-service persistence, app bootstrap and downstream clients). Integration tests
-(`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
+**Last verified:** `mvn verify` in `backend/` — **780 tests, 0 failures, 0 errors, 0 skipped**
+(Phase 6: payment-service — Razorpay orders, verification, webhooks, refunds and disputes).
+Integration tests (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests
+(`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
 schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
@@ -13,7 +14,10 @@ including OTP verification and token rotation (`CustomerJourneyIT`), administrat
 the customer/admin boundary (`AdminJourneyIT`), and outbox-to-broker delivery (`OutboxRelayIT`). The
 catalog service has integration tests on the same containers: schema/constraint agreement
 (`SchemaAndPersistenceIT`) and the full admin-and-storefront journey over real HTTP
-(`CatalogueJourneyIT`). The Redis rate limiter is additionally exercised against a real
+(`CatalogueJourneyIT`). The payment service has integration tests on the same containers: the
+Flyway migration, Hibernate `validate` agreement and every database constraint
+(`SchemaAndPersistenceIT`), and the full payment journey over real HTTP with real HMAC signature
+verification (`PaymentJourneyIT`). The Redis rate limiter is additionally exercised against a real
 `redis:7.4-alpine` container.
 
 **Correction (Phase 5 session).** The previously recorded figure was 446, with the gateway counted as
@@ -233,15 +237,53 @@ Four defects the journey tests caught, none of which a unit test could see:
 
 | # | Requirement | Status |
 |---|---|---|
-| 6.1 | Razorpay order creation | TODO |
-| 6.2 | Payment initiation | TODO |
-| 6.3 | Signature verification (backend only) | TODO |
-| 6.4 | Webhook signature verification | TODO |
-| 6.5 | Idempotent payment processing | TODO |
-| 6.6 | Duplicate event protection | TODO |
-| 6.7 | Payment success/failure/pending handling | TODO |
-| 6.8 | Payment transaction history | TODO |
-| 6.9 | Refunds and disputes | TODO |
+| 6.1 | Razorpay order creation | DONE — `RazorpayPaymentGateway.createOrder`; `PaymentService.initiate`; idempotent per order and per key |
+| 6.2 | Payment initiation | DONE — `POST /api/v1/payments/orders/{orderId}/initiate`; returns provider order id and publishable key |
+| 6.3 | Signature verification (backend only) | DONE — `RazorpayPaymentGateway.verifyCheckoutSignature` (HMAC over `order_id\|payment_id`); provider re-fetched before a payment is recorded as paid |
+| 6.4 | Webhook signature verification | DONE — `POST /api/v1/webhooks/razorpay` verifies the raw body before acting; refused when no secret is configured |
+| 6.5 | Idempotent payment processing | DONE — unique `order_id` and `provider_payment_id` indexes; `markCaptured` is a no-op on a repeat; `Idempotency-Key` honoured with fingerprint conflict detection |
+| 6.6 | Duplicate event protection | DONE — `PaymentJourneyIT.duplicate_capture_webhook_is_idempotent` (one attempt row after two deliveries) |
+| 6.7 | Payment success/failure/pending handling | DONE — `PaymentService.applyReportedState`; `authorized` is pending, not paid; provider unreachable leaves it pending |
+| 6.8 | Payment transaction history | DONE — `payments`, `payment_attempts`, `refunds`, `disputes`; customer and admin read surfaces |
+| 6.9 | Refunds and disputes | DONE — `RefundService` + `POST /api/v1/admin/payments/{id}/refunds` (permission-gated); dispute webhooks recorded |
+| 6.10 | Unit tests | DONE — 40 domain + 31 application + 18 adapter |
+| 6.11 | Integration tests | DONE — 18 `PaymentJourneyIT` + 7 `SchemaAndPersistenceIT` + 5 architecture |
+
+**Payment service (Phase 6).** A five-module Clean Architecture service under
+`backend/services/payment-service/`, on port 8084, owning the `choco_payment` database. It holds the
+one rule that makes the whole shop trustworthy: a payment is only ever recorded as successful after
+the *server* has confirmed it with the provider. The checkout signature is verified, then the payment
+is re-fetched from the provider, and only a captured payment for the expected amount is recorded as
+paid — a browser redirect to a success page is never taken as proof.
+
+- **Domain** (`payment-domain`): `Payment` aggregate with `PaymentStatus` state machine,
+  `PaymentMethod` (coarse UPI/CARD/NETBANKING classification only — never a card number or UPI id),
+  `Refund`, `Dispute`, `PaymentAttempt`, and the `PaymentPending`/`PaymentCaptured`/`PaymentFailed`/
+  `RefundProcessed`/`DisputeRaised` events. 40 tests.
+- **Application** (`payment-application`): `PaymentService`, `PaymentWebhookService`,
+  `RefundService`, `PaymentQueryService` — plain classes wired by configuration, no Spring import in
+  the layer. 31 tests.
+- **Adapters out** (`payment-adapters-out`): the Razorpay SDK is confined to
+  `RazorpayPaymentGateway` (an ArchUnit rule enforces this), JPA persistence, and the audit log.
+  18 tests including the signature algorithms.
+- **Adapters in / app** (`payment-adapters-in`, `payment-app`): customer, internal and admin
+  controllers, the webhook endpoint, and the Spring Boot bootstrap with the Flyway migration.
+
+**Money never leaves the database as a float.** Every monetary column is a `BIGINT` count of paise,
+with a `CHECK` constraint that the amount is positive and that the currency is INR. No column holds a
+card number, CVV, UPI PIN or bank credential — the provider's own checkout collects those.
+
+**The webhook is the authoritative path.** A UPI collect confirmed after the customer closed the tab
+is only ever seen by the webhook, so it is handled with the same care as the browser callback: the
+signature over the raw body is checked first, and the event is applied idempotently so a retried
+delivery changes nothing.
+
+### What the payment journey tests pinned down
+
+| Observation | Symptom | Resolution |
+|---|---|---|
+| Verification is a customer action | `POST /api/v1/payments/orders/{id}/verify` returned 404 | The endpoint is `/api/v1/payments/me/orders/{id}/verify`; the journey test now asserts the real path, so the contract is recorded rather than assumed |
+| A refund requires a captured payment | Refunding a merely-initiated payment returned 409 | Correct behaviour: the journey test verifies the capture first, matching the real sequence |
 
 ## Phase 7 — Made-to-order production
 
@@ -299,8 +341,8 @@ Four defects the journey tests caught, none of which a unit test could see:
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (282 green so far) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (identity service: real PostgreSQL, Redis, RabbitMQ, SMTP; 34 green) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (626 green: common + identity + catalog + order + payment) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (154 green: real PostgreSQL, Redis, RabbitMQ across identity, catalog, order and payment services) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | TODO |
 | 11.5 | Payment verification test | TODO |
@@ -330,10 +372,12 @@ Four defects the journey tests caught, none of which a unit test could see:
 | Argon2id or BCrypt cost 15 | DONE | Tests assert `$argon2id$` and `$2a$15$` |
 | Never expose password hashes | DONE | `AuthenticatedUser` carries no credential field |
 | No auth secrets in exports | TODO | Enforced in Phase 9 export |
-| Verify Razorpay on backend | TODO | Phase 6 |
-| Never trust frontend payment response | TODO | Phase 6 |
-| Prevent duplicate payment processing | TODO | Phase 6 idempotency |
-| Prevent incorrect order/inventory status | TODO | Phase 5/7 state machines |
+| Verify Razorpay on backend | DONE | `verifyCheckoutSignature` + provider re-fetch before a payment is marked paid; forged signature → `PAYMENT_SIGNATURE_INVALID` asserted in `PaymentJourneyIT` |
+| Never trust frontend payment response | DONE | A checkout redirect only triggers a server-side verify; the payment is marked paid only from the provider's captured state or a signed webhook |
+| Prevent duplicate payment processing | DONE | Unique `order_id`/`provider_payment_id` indexes; repeated webhook and repeated verify are no-ops (`PaymentJourneyIT`); `Idempotency-Key` with fingerprint conflict |
+| Webhook signature verified over the raw body | DONE | `RazorpayPaymentGatewayTest` computes real HMACs; an unsigned or tampered webhook is refused |
+| No card/CVV/UPI-PIN ever stored | DONE | Only identifiers and a coarse method classification exist in the schema; asserted by the migration's column set |
+| Prevent incorrect order/inventory status | IN PROGRESS | Order state machine done (Phase 5); production state machine in Phase 7 |
 | Customers access only own data | DONE | `requireOwnerOrAdmin` + tests |
 | Admin access protected | DONE | RBAC + permission tests; separate admin aggregate, no public admin sign-up, customer credentials rejected at the admin endpoint (verified over HTTP) |
 | Never hardcode credentials | DONE | `.env.example` only, no values committed |
@@ -362,15 +406,19 @@ Four defects the journey tests caught, none of which a unit test could see:
 | order-domain | 98 | green |
 | order-application | 54 | green |
 | order-adapters-out | 11 | green |
-| order-app | 12 (integration) | green |
-| api-gateway | 37 (14 unit + 23 integration) | green |
-| **Total** | **604** | **green** |
+| order-app | 39 (integration) | green |
+| payment-domain | 40 | green |
+| payment-application | 31 | green |
+| payment-adapters-out | 18 | green |
+| payment-app | 30 (5 unit + 25 integration) | green |
+| api-gateway | 40 (14 unit + 26 integration) | green |
+| **Total** | **780** | **green** |
 
 ### API Gateway integration tests (`mvn verify`)
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 9 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved |
+| RoutingIT | 14 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
@@ -397,6 +445,21 @@ Four defects the journey tests caught, none of which a unit test could see:
 |---|---|---|
 | SchemaAndPersistenceIT | 12 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; the order-number sequence issues distinct values; the stored total must equal items plus delivery charge; a negative amount and a foreign currency are rejected; the order number is unique; an orphan order line is rejected; a product delete cascades to lines, history and notes; one cart per customer; an idempotency key is unique per scope and reusable across scopes |
 | OutboundClientTest | 11 | The catalogue, identity and delivery clients against a real HTTP server: the exact request each sends (batch variant query, customer profile path, PIN-code path), a missing variant is absent rather than an error, an unknown customer or foreign address id is empty, and a downstream 5xx becomes `DEPENDENCY_UNAVAILABLE` rather than a business error or a silent "not serviceable" |
+
+### Payment integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 7 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; one payment per order and one payment per provider order are enforced by unique indexes; a non-positive amount and a non-INR currency are rejected by `CHECK` constraints; a refund must reference a real payment |
+| PaymentJourneyIT | 18 | The full payment journey over real HTTP: unauthenticated initiate refused; a customer starts a payment and receives the publishable key; initiation is idempotent per order and a replayed key for a different order is a 409; a captured payment with a valid signature is paid while a forged one is refused and leaves the payment unpaid; a customer cannot verify another's payment; `authorized` is pending, not paid; a signed capture webhook marks the payment paid, an unsigned one is refused, a duplicate delivery is a no-op with a single attempt row, and a webhook for an unknown payment is acknowledged; payment history and reads are scoped to the owner; a customer cannot reach the seller surface; an administrator sees the counters and refunds a captured payment |
+| CleanArchitectureTest | 5 | The domain depends on no framework and no provider SDK; the application layer depends on no adapter, persistence framework or provider SDK; only the gateway adapter may reference the Razorpay SDK; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
+
+### Adapter unit tests (`mvn test`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| RazorpayPaymentGatewayTest | 11 | The checkout signature is accepted only when it is the real HMAC over `order_id\|payment_id` with the account secret — computed independently with `javax.crypto`, so a wrong-field or wrong-secret bug cannot pass; a blank signature is refused; the webhook signature is checked over the raw body, a tampered body is refused, and every webhook is refused when no secret is configured; the webhook body parses a captured payment, a failure with its reason, and a refund that carries only a payment id; the publishable key is the key id and never the secret |
+| UnconfiguredPaymentGatewayTest | 7 | With no credentials the service boots but refuses every money-moving call with the missing-setting message, never verifies a signature, and exposes no publishable key — so a misconfigured deployment cannot report a fake success |
 
 ### Bugs the catalog integration tests caught
 

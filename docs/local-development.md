@@ -14,8 +14,10 @@
 ```bash
 # 1. Create your local environment file from the template.
 cp .env.example .env
-# Then edit .env and fill in anything you actually need. Razorpay keys can stay
-# blank until Phase 6; the services start without them in the default profile.
+# Then edit .env and fill in anything you actually need. Razorpay keys are now used
+# by payment-service (Phase 6): with them blank the service still starts, but it
+# refuses to create provider orders and refuses every webhook, which is the safe
+# default. Test-mode keys are enough for local development.
 
 # 2. Start the infrastructure (Postgres, Redis, RabbitMQ).
 docker compose up -d postgres redis rabbitmq

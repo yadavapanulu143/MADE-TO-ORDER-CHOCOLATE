@@ -1,0 +1,95 @@
+server:
+  port: 8085
+  shutdown: graceful
+
+spring:
+  application:
+    name: fulfilment-service
+  datasource:
+    url: ${CHOCO_FULFILMENT_DB_URL:jdbc:postgresql://localhost:5432/choco_fulfilment}
+    username: ${CHOCO_FULFILMENT_DB_USER:choco_fulfilment}
+    password: ${CHOCO_FULFILMENT_DB_PASSWORD:choco_fulfilment_pw}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate validates that the entities match it and never alters it:
+      # an automatic schema update in production can drop a column and its data.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        # Batch-fetch lazy child collections so loading a page of jobs costs a bounded number of
+        # queries rather than one per job.
+        default_batch_fetch_size: 50
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: ${CHOCO_REDIS_HOST:localhost}
+      port: ${CHOCO_REDIS_PORT:6379}
+      password: ${CHOCO_REDIS_PASSWORD:choco_redis_pw}
+      timeout: 2s
+  rabbitmq:
+    host: ${CHOCO_RABBITMQ_HOST:localhost}
+    port: ${CHOCO_RABBITMQ_PORT:5672}
+    username: ${CHOCO_RABBITMQ_USER:choco}
+    password: ${CHOCO_RABBITMQ_PASSWORD:choco_rabbit_pw}
+    listener:
+      simple:
+        # Acknowledge only after the handler returns, so a crash mid-hand-over redelivers the event
+        # rather than losing it. The hand-over is idempotent, so a redelivery is safe.
+        acknowledge-mode: auto
+        # One message at a time per consumer: the capacity check takes a lock, and prefetching a batch
+        # would have several hand-overs queueing behind each other for no throughput gain.
+        prefetch: 1
+
+choco:
+  security:
+    issuer: choco-identity
+    # The serviceability path is deliberately open to any signed-in caller: the checkout asks whether
+    # the seller delivers to a PIN code, and the answer is the same for everyone. Every other path is
+    # scoped to the caller's own data or guarded by an admin permission.
+    public-paths: []
+    jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+  cors:
+    allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+  fulfilment:
+    capacity:
+      # How many units the seller can have in the kitchen at once. Zero means no cap, which is the
+      # correct default for a seller who has not yet decided how much they can make at a time.
+      max-units-in-progress: ${CHOCO_FULFILMENT_MAX_UNITS:0}
+    delivery:
+      # Whether a delivery may be marked delivered without a proof reference. Off by default: the
+      # seller confirms receipt, and a reference is optional rather than required.
+      proof-required: ${CHOCO_FULFILMENT_PROOF_REQUIRED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${CHOCO_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${CHOCO_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+logging:
+  level:
+    com.choco: ${CHOCO_LOG_LEVEL:INFO}

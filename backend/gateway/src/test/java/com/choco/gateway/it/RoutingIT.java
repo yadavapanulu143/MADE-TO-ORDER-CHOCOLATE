@@ -25,6 +25,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     private static final MockWebServer IDENTITY = downstream();
     private static final MockWebServer CATALOG = downstream();
     private static final MockWebServer ORDER = downstream();
+    private static final MockWebServer FULFILMENT = downstream();
 
     private static MockWebServer downstream() {
         MockWebServer server = new MockWebServer();
@@ -51,6 +52,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         registry.add("choco.gateway.services.identity", () -> IDENTITY.url("/").toString());
         registry.add("choco.gateway.services.catalog", () -> CATALOG.url("/").toString());
         registry.add("choco.gateway.services.order", () -> ORDER.url("/").toString());
+        registry.add("choco.gateway.services.fulfilment", () -> FULFILMENT.url("/").toString());
     }
 
     @AfterAll
@@ -58,6 +60,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         IDENTITY.shutdown();
         CATALOG.shutdown();
         ORDER.shutdown();
+        FULFILMENT.shutdown();
     }
 
     @Test
@@ -178,6 +181,37 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(401);
         assertThat(ORDER.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("a public serviceability request reaches the fulfilment service without a token")
+    void serviceabilityReachesFulfilment() {
+        HttpResponse<String> response = get("/api/v1/serviceability/560001", null);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/serviceability/560001");
+    }
+
+    @Test
+    @DisplayName("an authenticated customer's own fulfilment progress reaches the fulfilment service")
+    void customerFulfilmentReachesFulfilmentService() {
+        HttpResponse<String> response = get("/api/v1/fulfilment/me/deliveries", customerToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText())
+                .isEqualTo("/api/v1/fulfilment/me/deliveries");
+    }
+
+    @Test
+    @DisplayName("the administrative fulfilment surface is not public: no token is refused at the edge")
+    void adminFulfilmentIsNotPublic() throws Exception {
+        int before = FULFILMENT.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/admin/fulfilment/production/jobs", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        // The refusal happens at the edge, so the kitchen surface never sees an unauthenticated read.
+        assertThat(FULFILMENT.getRequestCount()).isEqualTo(before);
     }
 
     @Test

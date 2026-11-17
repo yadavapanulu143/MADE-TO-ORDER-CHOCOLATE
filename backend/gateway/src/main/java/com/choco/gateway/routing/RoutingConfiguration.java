@@ -77,8 +77,8 @@ public class RoutingConfiguration {
     @Bean
     RouterFunction<ServerResponse> fulfilmentRoutes(GatewayProperties properties) {
         return serviceRoute(properties, "fulfilment",
-                "/api/v1/production/**", "/api/v1/deliveries/**", "/api/v1/serviceability/**",
-                "/api/v1/delivery-charges/**", "/api/v1/ingredients/**");
+                "/api/v1/serviceability/**", "/api/v1/fulfilment/**",
+                "/api/v1/admin/fulfilment/**");
     }
 
     @Bean

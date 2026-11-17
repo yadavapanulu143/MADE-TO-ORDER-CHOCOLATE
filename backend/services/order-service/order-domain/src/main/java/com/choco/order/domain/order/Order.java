@@ -206,7 +206,31 @@ public class Order extends AggregateRoot {
         this.preparationStatus = PreparationStatus.AWAITING_PREPARATION;
         transitionTo(OrderStatus.CONFIRMED, "Payment verified", "payment-service", now);
         registerEvent(new OrderConfirmed(UUID.randomUUID(), now, id.toString(), customerId.toString(),
-                orderNumber, paymentId));
+                orderNumber, paymentId, customer.fullName(), confirmedAddress(),
+                deliveryCharge.minorUnits(), deliveryCharge.currency().getCurrencyCode(),
+                confirmedLines()));
+    }
+
+    /** The delivery address frozen at checkout, in the shape the fulfilment service delivers to. */
+    private OrderConfirmed.ConfirmedAddress confirmedAddress() {
+        return new OrderConfirmed.ConfirmedAddress(deliveryAddress.recipientName(),
+                deliveryAddress.mobile().value(), deliveryAddress.line1(), deliveryAddress.line2(),
+                deliveryAddress.city(), deliveryAddress.state(), deliveryAddress.pincode().value(),
+                deliveryAddress.deliveryInstructions());
+    }
+
+    /**
+     * The order lines in the shape the fulfilment service opens jobs from.
+     *
+     * <p>Kept on the aggregate so the confirmed event carries exactly the frozen purchase facts and
+     * the fulfilment service never has to call back here to learn what was bought.
+     */
+    private List<OrderConfirmed.ConfirmedLine> confirmedLines() {
+        return lines.stream()
+                .map(line -> new OrderConfirmed.ConfirmedLine(line.productId().toString(),
+                        line.variantId().toString(), line.productName(), line.variantLabel(),
+                        line.quantity().value()))
+                .toList();
     }
 
     /** Records a failed or unverifiable payment. Preparation remains locked. */

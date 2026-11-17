@@ -3,8 +3,8 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — **780 tests, 0 failures, 0 errors, 0 skipped**
-(Phase 6: payment-service — Razorpay orders, verification, webhooks, refunds and disputes).
+**Last verified:** `mvn verify` in `backend/` — **907 tests, 0 failures, 0 errors, 0 skipped**
+(Phase 7/8: fulfilment-service — made-to-order production, ingredients and seller-managed delivery).
 Integration tests (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests
 (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
@@ -17,7 +17,12 @@ catalog service has integration tests on the same containers: schema/constraint 
 (`CatalogueJourneyIT`). The payment service has integration tests on the same containers: the
 Flyway migration, Hibernate `validate` agreement and every database constraint
 (`SchemaAndPersistenceIT`), and the full payment journey over real HTTP with real HMAC signature
-verification (`PaymentJourneyIT`). The Redis rate limiter is additionally exercised against a real
+verification (`PaymentJourneyIT`). The fulfilment service has integration tests on the same
+containers plus a real RabbitMQ consumer: the Flyway migration, Hibernate `validate` agreement and
+every database constraint (`SchemaAndPersistenceIT`), and the made-to-order hand-over over a real
+broker — a confirmed order opens a kitchen job, a redelivery opens none, the seller walks it to ready
+for dispatch (which opens the delivery), and a cancelled order abandons its jobs
+(`FulfilmentJourneyIT`). The Redis rate limiter is additionally exercised against a real
 `redis:7.4-alpine` container.
 
 **Correction (Phase 5 session).** The previously recorded figure was 446, with the gateway counted as
@@ -291,24 +296,60 @@ delivery changes nothing.
 
 | # | Requirement | Status |
 |---|---|---|
-| 7.1 | Preparation queue from confirmed orders | TODO |
-| 7.2 | Production statuses (Received→Awaiting→Started→Completed→Packaging→Ready) | TODO |
-| 7.3 | Production notes | TODO |
-| 7.4 | Optional ingredient/raw-material inventory | TODO |
-| 7.5 | Low-stock alerts | TODO |
-| 7.6 | Concurrent order handling | TODO |
+| 7.1 | Preparation queue from confirmed orders | DONE — `OrderEventsListener` consumes `order.confirmed` and opens one job per line; no endpoint or event can open a job, so nothing is made before payment is verified |
+| 7.2 | Production statuses (Received→Awaiting→Started→Completed→Packaging→Ready) | DONE — `ProductionStatus` state machine with an explicit transition table; hold/resume and a cancellation window; illegal jumps refused |
+| 7.3 | Production notes | DONE — `ProductionNote` on the job, length-capped, persisted with the aggregate |
+| 7.4 | Optional ingredient/raw-material inventory | DONE — `Ingredient` aggregate (unit, on-hand, minimum, active), `RecipeLine` per variant, append-only `StockLedgerEntry`; nothing is assumed, a variant with no recipe consumes nothing |
+| 7.5 | Low-stock alerts | DONE — `LowStockDetected` raised on consumption to or below the minimum; a zero minimum never alerts |
+| 7.6 | Concurrent order handling | DONE — capacity cap on units in progress (`choco.fulfilment.capacity.max-units-in-progress`, zero = no cap) and optimistic locking on every aggregate |
 
 ## Phase 8 — Seller-managed delivery
 
 | # | Requirement | Status |
 |---|---|---|
-| 8.1 | Serviceable PIN-code management | TODO |
-| 8.2 | Configurable delivery charges | TODO |
-| 8.3 | Delivery assignment | TODO |
-| 8.4 | Delivery workflow (10 states) | TODO |
-| 8.5 | Delivery attempts + failure reasons | TODO |
-| 8.6 | Customer delivery tracking | TODO |
-| 8.7 | No fabricated GPS/courier data | TODO |
+| 8.1 | Serviceable PIN-code management | DONE — `ServiceableArea` (exact PIN or prefix, longest-prefix wins); admin CRUD under `/api/v1/admin/fulfilment/serviceable-areas` (`settings:write`) |
+| 8.2 | Configurable delivery charges | DONE — per-area charge in paise; a quote returns the charge or a reasoned "not serviceable", never an error |
+| 8.3 | Delivery assignment | DONE — `Delivery.assign`; re-assignment allowed before dispatch only |
+| 8.4 | Delivery workflow (10 states) | DONE — `DeliveryStatus` state machine: pending, assigned, out for delivery, delivered, attempt failed, rescheduled, cancelled, returned |
+| 8.5 | Delivery attempts + failure reasons | DONE — `DeliveryAttempt` rows numbered from one; a failed attempt carries the free-text reason the seller typed |
+| 8.6 | Customer delivery tracking | DONE — `CustomerFulfilmentController` exposes the customer's own preparation and delivery progress, owner-scoped |
+| 8.7 | No fabricated GPS/courier data | DONE — there is no tracking number and no position anywhere in the model; the customer sees exactly what the seller recorded |
+
+**Fulfilment service (Phases 7 and 8).** A five-module Clean Architecture service under
+`backend/services/fulfilment-service/`, on port 8085, owning the `choco_fulfilment` database. It holds
+the made-to-order model end to end: a confirmed order becomes a kitchen job, the seller walks the job
+through preparation, and the moment it is ready for dispatch a delivery record is opened against the
+address frozen at checkout. Delivery is seller-managed, so there is no courier SDK here — the only
+outbound call is to a sibling service, and no GPS position or tracking number is invented.
+
+- **Domain** (`fulfilment-domain`): `ProductionJob` (status machine, notes, ingredient-consumption
+  flag), `Ingredient`/`RecipeLine`/`StockLedgerEntry`/`StockLevel`, `ServiceableArea`, `Delivery`/
+  `DeliveryAttempt`, and the production and delivery events. 86 tests.
+- **Application** (`fulfilment-application`): `ProductionService`, `ProductionQueryService`,
+  `DeliveryService`, `InventoryService` — plain classes wired by configuration, no Spring import in
+  the layer. 36 tests.
+- **Adapters out** (`fulfilment-adapters-out`): JPA persistence with optimistic locking, the audit
+  log (written in its own transaction so a rejected change still leaves a record), and the shared
+  outbox.
+- **Adapters in / app** (`fulfilment-adapters-in`, `fulfilment-app`): the admin, serviceability and
+  customer controllers, the `order.confirmed`/`order.cancelled` consumer, and the Spring Boot
+  bootstrap with the Flyway migration. 27 tests (4 architecture + 23 integration).
+
+**Nothing is made before a payment is verified.** The only way a production job is created is the
+`order.confirmed` event, which the order service raises only after it has recorded a verified payment.
+There is no REST endpoint that opens a job and no other event bound to the queue, so the rule is
+enforced by the shape of the system rather than by a check someone could forget.
+
+**The hand-over is idempotent by construction.** A redelivered `order.confirmed` finds the jobs it
+already opened (keyed on order id and variant id) and opens nothing new; a redelivered
+`order.cancelled` finds the jobs already cancelled and does nothing. A broker retry, or a consumer
+restart before the acknowledgement, cannot double the kitchen's work or return ingredients twice.
+
+**Ingredient tracking is optional by design.** The requirements are explicit that raw-material
+inventory may not be configured at first and that made-to-order preparation must work without it, so
+an ingredient is a separate aggregate the seller opts into: a job's preparation status advances
+whether or not any ingredient exists, and consumption is only attempted when a recipe has been
+configured for the variant. A variant with no recipe consumes nothing.
 
 ## Phase 9 — Admin dashboard
 
@@ -413,14 +454,17 @@ delivery changes nothing.
 | payment-application | 31 | green |
 | payment-adapters-out | 18 | green |
 | payment-app | 30 (5 unit + 25 integration) | green |
-| api-gateway | 40 (14 unit + 26 integration) | green |
-| **Total** | **780** | **green** |
+| api-gateway | 43 (14 unit + 29 integration) | green |
+| fulfilment-domain | 86 | green |
+| fulfilment-application | 36 | green |
+| fulfilment-app | 27 (4 unit + 23 integration) | green |
+| **Total** | **907** | **green** |
 
 ### API Gateway integration tests (`mvn verify`)
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 14 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved |
+| RoutingIT | 17 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
@@ -462,6 +506,14 @@ delivery changes nothing.
 |---|---|---|
 | RazorpayPaymentGatewayTest | 11 | The checkout signature is accepted only when it is the real HMAC over `order_id\|payment_id` with the account secret — computed independently with `javax.crypto`, so a wrong-field or wrong-secret bug cannot pass; a blank signature is refused; the webhook signature is checked over the raw body, a tampered body is refused, and every webhook is refused when no secret is configured; the webhook body parses a captured payment, a failure with its reason, and a refund that carries only a payment id; the publishable key is the key id and never the secret |
 | UnconfiguredPaymentGatewayTest | 7 | With no credentials the service boots but refuses every money-moving call with the missing-setting message, never verifies a signature, and exposes no publishable key — so a misconfigured deployment cannot report a fake success |
+
+### Fulfilment integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 11 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; every database constraint holds — a non-positive quantity, a negative stock level, a negative delivery charge and an out-of-range status are all rejected, and one delivery per order is enforced by a unique index |
+| FulfilmentJourneyIT | 12 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one; the customer sees only their own progress; the admin surface is closed to customers |
+| CleanArchitectureTest | 4 | The domain depends on no framework; the application layer depends on no adapter or persistence framework; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
 
 ### Bugs the catalog integration tests caught
 

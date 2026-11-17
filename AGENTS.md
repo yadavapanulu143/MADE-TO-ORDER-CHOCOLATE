@@ -30,7 +30,8 @@ integration and future session. They are not optional and are not renegotiated p
    priority-based reordering. Finish one module before starting the next, then proceed without
    asking.
    - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
-     Razorpay Payment (done, `707f193`)**. The next module is **Made-to-Order Production** (Phase 7).
+     Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
+     the `fulfilment-service`)**. The next module is **Notification** (Phase 10).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -368,9 +369,38 @@ The order service follows the same five-module shape as identity and catalog. Th
   entity at version 0 makes the next update match no row, so optimistic locking silently stops
   working and a concurrent edit is lost instead of refused.
 
+## Fulfilment service conventions
+
+The fulfilment service (port 8085, database `choco_fulfilment`) owns made-to-order production and
+seller-managed delivery in the same five-module shape as the others. Things specific to it:
+
+- **A job is opened only by `order.confirmed`.** There is no REST endpoint that creates a job and no
+  other event bound to the queue, so "nothing is made before a payment is verified" is enforced by the
+  shape of the system, not by a check someone could forget. Do not add a "create job" endpoint.
+- **Consumption is idempotent by key.** A redelivered `order.confirmed` finds the jobs it already
+  opened (order id + variant id) and opens nothing new; a redelivered `order.cancelled` finds the jobs
+  already cancelled. A broker retry must never double the kitchen's work or return ingredients twice.
+- **Ingredient tracking is optional by design.** A job's preparation status advances whether or not
+  any ingredient exists, and consumption is only attempted when a recipe line exists for the variant.
+  A variant with no recipe consumes nothing — never assume a recipe.
+- **The production and delivery status machines are explicit tables.** `ProductionStatus.canTransitionTo`
+  and `DeliveryStatus.canTransitionTo` encode the real edges; an ordinal comparison would let the
+  seller skip making the chocolate or deliver before dispatch. Never set a status field directly.
+- **The delivery is opened when the job reaches `READY_FOR_DISPATCH`,** against the address frozen in
+  the confirmed event. Delivery is seller-managed: there is no courier SDK, no tracking number and no
+  GPS position anywhere in the model, and none may be fabricated.
+- **A `ServiceableArea` is an exact PIN or a prefix; longest prefix wins.** A zero charge is a real
+  value ("free delivery here"), not "unset". A quote for an uncovered PIN is a reasoned answer, not an
+  error.
+- **Money stays in paise and stock stays in milli-units.** `Money.inr(...)` and `StockLevel` (three
+  decimal places, integer arithmetic) — no `double` anywhere, because a recipe that subtracts 0.1 g a
+  hundred times must not drift.
+- **A mapper that rebuilds an entity must carry the current `@Version` onto it,** exactly as in the
+  other services, or optimistic locking silently stops working.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **780 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn verify` at `backend/`: **907 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -396,8 +426,11 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| api-gateway | 40 (14 unit + 26 integration: real Redis) |
-| **total** | **780** |
+| api-gateway | 43 (14 unit + 29 integration: real Redis) |
+| fulfilment-domain | 86 |
+| fulfilment-application | 36 |
+| fulfilment-app | 27 (4 architecture + 23 integration: real PostgreSQL, Redis, RabbitMQ) |
+| **total** | **907** |
 
 An earlier revision of this table claimed 446, counting the gateway's unit tests as 35. That number
 was wrong. `GatewayPropertiesTest` has always held 14 `@Test` methods — 13 when it was first added
@@ -414,7 +447,9 @@ not only the status it returned.
 
 - `RoutingIT` — a public request reaches its service; a protected one arrives with the token intact;
   a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an
-  unknown path is not routed; the correlation id is preserved.
+  unknown path is not routed; the correlation id is preserved; a public serviceability lookup and a
+  customer's own fulfilment progress reach the fulfilment service, while the administrative kitchen
+  surface is refused without a token.
 - `RateLimitIT` — a burst is throttled once the allowance is spent; auth paths use the tighter
   allowance; a throttled request never reaches the service; the auth and general buckets are counted
   independently.
@@ -468,6 +503,25 @@ real filter chain verifies.
   counters and refund.
 - `CleanArchitectureTest` — the Razorpay SDK never leaves the gateway adapter; the domain and
   application layers depend on no framework, adapter or provider SDK.
+
+`fulfilment-app` carries its own integration tests under `src/test/java/com/choco/fulfilment/it`
+(`AbstractFulfilmentIntegrationTest` starts real PostgreSQL, RabbitMQ and Redis, and serves the
+service on a random port). The hand-over is exercised through the real broker: a test publishes the
+`order.confirmed` event the order service raises and waits for the consumer to open the job, so
+idempotent consumption is proven end to end rather than assumed. Authentication is local: the test
+supplies its own RSA key and a matching `JwtDecoder`, and mints real RS256 tokens the real filter
+chain verifies.
+
+- `SchemaAndPersistenceIT` — Flyway applied V1, Hibernate `validate` passes, and the database-level
+  constraints reject a non-positive quantity, a negative stock level, a negative delivery charge, an
+  out-of-range status and a second delivery for one order.
+- `FulfilmentJourneyIT` — the made-to-order hand-over over a real broker and real HTTP: a confirmed
+  order opens one job per line, a redelivery opens none, the seller walks a job to ready for dispatch
+  (which opens exactly one delivery at the frozen address), an illegal jump is refused, a cancelled
+  order abandons its jobs, a serviceability quote answers a covered PIN with its charge and an
+  uncovered one with a reason, and the customer/admin boundary holds.
+- `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
+  persistence technology; inbound adapters do not reach into persistence.
 
 ## Local dev services
 

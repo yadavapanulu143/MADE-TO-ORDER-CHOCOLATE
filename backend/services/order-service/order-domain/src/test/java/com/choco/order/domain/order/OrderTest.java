@@ -247,6 +247,62 @@ class OrderTest {
             assertThat(order.paymentStatus()).isEqualTo(PaymentStatus.VERIFICATION_PENDING);
             assertThat(order.isPaid()).isFalse();
         }
+
+        @Test
+        @DisplayName("a pending order may start a payment")
+        void pendingCanStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.assertPaymentInitiable();
+        }
+
+        @Test
+        @DisplayName("a failed order may start a payment again")
+        void failedCanStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.markPaymentFailed("card declined", LATER);
+            order.assertPaymentInitiable();
+        }
+
+        @Test
+        @DisplayName("an order awaiting verification may reopen the checkout")
+        void verificationPendingCanStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.markPaymentVerificationPending("pay_1", "order_1", LATER);
+            order.assertPaymentInitiable();
+        }
+
+        @Test
+        @DisplayName("a paid order cannot start another payment")
+        void paidCannotStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.markPaid("pay_1", "order_1", Money.inr(15000), LATER);
+
+            assertThatThrownBy(order::assertPaymentInitiable)
+                    .isInstanceOf(BusinessRuleException.class)
+                    .satisfies(ex -> assertThat(((BusinessRuleException) ex).errorCode())
+                            .isEqualTo(ErrorCode.PAYMENT_ALREADY_CAPTURED));
+        }
+
+        @Test
+        @DisplayName("a cancelled order cannot start a payment")
+        void cancelledCannotStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.cancel("changed my mind", OrderTestSupport.CUSTOMER.toString(), LATER);
+
+            assertThatThrownBy(order::assertPaymentInitiable)
+                    .isInstanceOf(BusinessRuleException.class);
+        }
+
+        @Test
+        @DisplayName("an order under refund review cannot start a payment")
+        void refundReviewCannotStartPayment() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.markPaid("pay_1", "order_1", Money.inr(15000), LATER);
+            order.requestRefund("damaged", LATER);
+
+            assertThatThrownBy(order::assertPaymentInitiable)
+                    .isInstanceOf(BusinessRuleException.class);
+        }
     }
 
     @Nested

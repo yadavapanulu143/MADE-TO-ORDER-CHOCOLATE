@@ -501,6 +501,33 @@ public class Order extends AggregateRoot {
         return paymentStatus == PaymentStatus.PAID;
     }
 
+    /**
+     * Guards starting a payment for this order.
+     *
+     * <p>Refused once the money is already in — a paid order must never be charged again — and refused
+     * for a cancelled or refunded order, which is no longer something the seller will make. A payment
+     * that is pending, failed or still being verified is eligible: the first is the normal case, the
+     * second is a retry after a decline, and the third lets a customer reopen the checkout for a
+     * payment that is in flight, which the payment service answers idempotently with the same provider
+     * order rather than a second one.
+     */
+    public void assertPaymentInitiable() {
+        if (paymentStatus == PaymentStatus.PAID) {
+            throw new BusinessRuleException(ErrorCode.PAYMENT_ALREADY_CAPTURED,
+                    "This order has already been paid");
+        }
+        if (paymentStatus == PaymentStatus.REFUND_UNDER_REVIEW
+                || paymentStatus == PaymentStatus.REFUNDED) {
+            throw new BusinessRuleException(ErrorCode.INVALID_STATUS_TRANSITION,
+                    "This order can no longer be paid");
+        }
+        if (status != OrderStatus.PAYMENT_PENDING && status != OrderStatus.PAYMENT_FAILED
+                && status != OrderStatus.PAYMENT_VERIFICATION_PENDING) {
+            throw new BusinessRuleException(ErrorCode.INVALID_STATUS_TRANSITION,
+                    "This order can no longer be paid");
+        }
+    }
+
     public boolean isCancellable() {
         return !status.isTerminal() && status != OrderStatus.OUT_FOR_DELIVERY && status != OrderStatus.DELIVERED;
     }

@@ -8,11 +8,13 @@ import com.choco.order.application.port.AuditLogPort;
 import com.choco.order.application.port.CatalogPort;
 import com.choco.order.application.port.CustomerPort;
 import com.choco.order.application.port.OrderNumberGenerator;
+import com.choco.order.application.port.PaymentPort;
 import com.choco.order.application.port.ServiceabilityPort;
 import com.choco.order.application.service.CartService;
 import com.choco.order.application.service.CheckoutService;
 import com.choco.order.application.service.OrderCommandService;
 import com.choco.order.application.service.OrderQueryService;
+import com.choco.order.application.service.PaymentInitiationService;
 import com.choco.order.domain.port.CartRepository;
 import com.choco.order.domain.port.IdempotencyRecordRepository;
 import com.choco.order.domain.port.OrderRepository;
@@ -62,5 +64,11 @@ class OrderApplicationConfiguration {
     @Bean
     OrderQueryService orderQueryService(OrderRepository orderRepository) {
         return new OrderQueryService(orderRepository);
+    }
+
+    @Bean
+    PaymentInitiationService paymentInitiationService(OrderRepository orderRepository,
+                                                      PaymentPort paymentPort, AuditLogPort auditLog) {
+        return new PaymentInitiationService(orderRepository, paymentPort, auditLog);
     }
 }

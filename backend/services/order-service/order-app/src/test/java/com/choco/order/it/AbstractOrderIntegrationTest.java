@@ -108,6 +108,7 @@ public abstract class AbstractOrderIntegrationTest {
         registry.add("choco.order.downstream.catalog", DOWNSTREAM::baseUrl);
         registry.add("choco.order.downstream.identity", DOWNSTREAM::baseUrl);
         registry.add("choco.order.downstream.fulfilment", DOWNSTREAM::baseUrl);
+        registry.add("choco.order.downstream.payment", DOWNSTREAM::baseUrl);
     }
 
     @TestConfiguration
@@ -262,6 +263,7 @@ public abstract class AbstractOrderIntegrationTest {
         properties.setCatalog(URI.create(DOWNSTREAM.baseUrl()));
         properties.setIdentity(URI.create(DOWNSTREAM.baseUrl()));
         properties.setFulfilment(URI.create(DOWNSTREAM.baseUrl()));
+        properties.setPayment(URI.create(DOWNSTREAM.baseUrl()));
         return properties;
     }
 

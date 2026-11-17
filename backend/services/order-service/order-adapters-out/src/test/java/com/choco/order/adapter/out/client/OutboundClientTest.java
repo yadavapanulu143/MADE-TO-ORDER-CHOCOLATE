@@ -3,11 +3,13 @@ package com.choco.order.adapter.out.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.choco.core.domain.Money;
 import com.choco.core.domain.Pincode;
 import com.choco.core.error.DomainException;
 import com.choco.core.error.ErrorCode;
 import com.choco.order.application.port.CatalogPort;
 import com.choco.order.application.port.CustomerPort;
+import com.choco.order.application.port.PaymentPort;
 import com.choco.order.application.port.ServiceabilityPort;
 import java.net.URI;
 import java.util.List;
@@ -43,6 +45,7 @@ class OutboundClientTest {
         properties.setCatalog(URI.create(server.url("/").toString()));
         properties.setIdentity(URI.create(server.url("/").toString()));
         properties.setFulfilment(URI.create(server.url("/").toString()));
+        properties.setPayment(URI.create(server.url("/").toString()));
     }
 
     @AfterEach
@@ -247,6 +250,65 @@ class OutboundClientTest {
 
         ServiceabilityClient client = new ServiceabilityClient(properties, noToken());
         assertThatThrownBy(() -> client.quoteFor(Pincode.of("560001")))
+                .isInstanceOf(DomainException.class)
+                .satisfies(e -> assertThat(((DomainException) e).errorCode())
+                        .isEqualTo(ErrorCode.DEPENDENCY_UNAVAILABLE));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Payment
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("starts a payment with the order's amount and forwards the idempotency key")
+    void payment_starts_with_the_orders_amount() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("""
+                        {"provider": "razorpay", "providerOrderId": "order_rzp_1", "amountMinorUnits": 54900,
+                         "amount": "549.00", "currency": "INR", "receipt": "CHOCO-2026001-1000",
+                         "publicKey": "rzp_test_key"}
+                        """));
+
+        PaymentClient client = new PaymentClient(properties, noToken());
+        PaymentPort.Initiation initiation = client.initiate(orderId, Money.inr(54900),
+                "CHOCO-2026001-1000", "key-1");
+
+        assertThat(initiation.providerOrderId()).isEqualTo("order_rzp_1");
+        assertThat(initiation.amountMinorUnits()).isEqualTo(54900);
+        assertThat(initiation.publicKey()).isEqualTo("rzp_test_key");
+
+        RecordedRequest request = server.takeRequest();
+        assertThat(request.getPath()).isEqualTo("/api/v1/payments/orders/" + orderId + "/initiate");
+        assertThat(request.getHeader("Idempotency-Key")).isEqualTo("key-1");
+        // The customer id must never be sent: the payment service takes it from the forwarded token.
+        assertThat(request.getBody().readUtf8())
+                .contains("\"amountMinorUnits\":54900")
+                .doesNotContain("customerId");
+    }
+
+    @Test
+    @DisplayName("a payment outage is reported as a dependency failure, never a false success")
+    void payment_outage_is_a_dependency_failure() {
+        server.enqueue(new MockResponse().setResponseCode(503));
+
+        PaymentClient client = new PaymentClient(properties, noToken());
+        assertThatThrownBy(() -> client.initiate(UUID.randomUUID(), Money.inr(100), "r", "k"))
+                .isInstanceOf(DomainException.class)
+                .satisfies(e -> assertThat(((DomainException) e).errorCode())
+                        .isEqualTo(ErrorCode.DEPENDENCY_UNAVAILABLE));
+    }
+
+    @Test
+    @DisplayName("a response with no provider order id is a failure, not a half-built initiation")
+    void payment_response_without_a_provider_order_is_a_failure() {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"provider\": \"razorpay\", \"amountMinorUnits\": 100}"));
+
+        PaymentClient client = new PaymentClient(properties, noToken());
+        assertThatThrownBy(() -> client.initiate(UUID.randomUUID(), Money.inr(100), "r", "k"))
                 .isInstanceOf(DomainException.class)
                 .satisfies(e -> assertThat(((DomainException) e).errorCode())
                         .isEqualTo(ErrorCode.DEPENDENCY_UNAVAILABLE));

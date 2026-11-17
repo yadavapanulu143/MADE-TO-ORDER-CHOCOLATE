@@ -87,13 +87,18 @@ transaction* as the state change. A relay publishes it and marks it sent. This r
 window where a commit fails but the message is already gone. The relay query uses
 `FOR UPDATE SKIP LOCKED`, which makes it safe to run on several replicas.
 
-**The order→payment→production saga is closed by events, not by HTTP.** `order-service` consumes
-`payment.captured`, `payment.failed`, `payment.pending` and `payment.refund-processed` on its own
-durable queue and moves the order's payment state from the event alone; `fulfilment-service` opens a
-production job from `order.confirmed`. There is deliberately no synchronous "mark paid" endpoint, so a
-browser cannot confirm its own payment and a payment can never be confirmed by anything but a verified
-provider fact. The consumer refuses a capture whose amount is not the order's exact frozen total
-(`PAYMENT_AMOUNT_MISMATCH`), because the initiate call carries a caller-supplied amount.
+**The order→payment→production saga is closed by events, not by HTTP.** The customer starts paying at
+`POST /api/v1/orders/me/{orderId}/payment`, which the order service answers by reading the order's
+*own* frozen total and asking payment-service to create a provider order. The amount is never taken
+from the request, so a caller cannot ask to be charged less than the order costs; and because
+payment-service verifies a capture against the amount it was asked to collect, the same frozen total
+guards both ends of the wire. `order-service` then consumes `payment.captured`, `payment.failed`,
+`payment.pending` and `payment.refund-processed` on its own durable queue and moves the order's payment
+state from the event alone; `fulfilment-service` opens a production job from `order.confirmed`. There
+is deliberately no synchronous "mark paid" endpoint, so a browser cannot confirm its own payment and a
+payment can never be confirmed by anything but a verified provider fact. The consumer additionally
+refuses a capture whose amount is not the order's exact frozen total (`PAYMENT_AMOUNT_MISMATCH`), so a
+mismatch is caught even if the initiate call were ever wrong.
 
 **Every consumer queue rejects rather than requeues on repeated failure.** A bounded retry
 (3 attempts, 1s→2s backoff, 10s cap) followed by `default-requeue-rejected: false` sends a poison

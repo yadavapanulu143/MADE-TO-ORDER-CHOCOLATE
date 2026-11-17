@@ -22,6 +22,9 @@ public class DownstreamProperties {
     /** Fulfilment service, for PIN serviceability and the delivery charge. */
     private URI fulfilment = URI.create("http://localhost:8085");
 
+    /** Payment service, to create a provider order when a customer starts paying. */
+    private URI payment = URI.create("http://localhost:8084");
+
     /**
      * How long to wait for a downstream response.
      *
@@ -55,6 +58,14 @@ public class DownstreamProperties {
 
     public void setFulfilment(URI fulfilment) {
         this.fulfilment = fulfilment;
+    }
+
+    public URI getPayment() {
+        return payment;
+    }
+
+    public void setPayment(URI payment) {
+        this.payment = payment;
     }
 
     public java.time.Duration getReadTimeout() {

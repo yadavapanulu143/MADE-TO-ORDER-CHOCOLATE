@@ -75,11 +75,12 @@ choco:
     allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
   order:
     downstream:
-      # The services the order service calls synchronously during cart and checkout. A missing address
-      # fails at startup rather than at the first checkout.
+      # The services the order service calls synchronously during cart, checkout and payment
+      # initiation. A missing address fails at startup rather than at the first checkout.
       catalog: ${CHOCO_CATALOG_URI:http://localhost:8082}
       identity: ${CHOCO_IDENTITY_URI:http://localhost:8081}
       fulfilment: ${CHOCO_FULFILMENT_URI:http://localhost:8085}
+      payment: ${CHOCO_PAYMENT_URI:http://localhost:8084}
       connect-timeout: 2s
       read-timeout: 5s
 

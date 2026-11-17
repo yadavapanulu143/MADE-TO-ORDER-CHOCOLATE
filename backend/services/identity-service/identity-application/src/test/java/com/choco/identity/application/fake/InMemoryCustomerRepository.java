@@ -2,9 +2,12 @@ package com.choco.identity.application.fake;
 
 import com.choco.core.domain.EmailAddress;
 import com.choco.core.domain.PhoneNumber;
+import com.choco.core.page.PageResult;
+import com.choco.core.port.PageQuery;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.port.CustomerRepository;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,6 +50,22 @@ public class InMemoryCustomerRepository implements CustomerRepository {
     @Override
     public boolean existsByMobile(PhoneNumber mobile) {
         return findByMobile(mobile).isPresent();
+    }
+
+    @Override
+    public PageResult<Customer> search(String search, PageQuery page) {
+        String term = search == null ? "" : search.trim().toLowerCase(java.util.Locale.ROOT);
+        List<Customer> matches = byId.values().stream()
+                .filter(c -> term.isEmpty()
+                        || c.contact().fullName().toLowerCase(java.util.Locale.ROOT).contains(term)
+                        || c.contact().email().value().toLowerCase(java.util.Locale.ROOT).contains(term)
+                        || c.contact().mobile().value().contains(term))
+                .sorted(java.util.Comparator.comparing(Customer::registeredAt).reversed()
+                        .thenComparing(Customer::id))
+                .toList();
+        int from = Math.min(page.offset(), matches.size());
+        int to = Math.min(from + page.size(), matches.size());
+        return PageResult.of(matches.subList(from, to), page.page(), page.size(), matches.size());
     }
 
     public int count() {

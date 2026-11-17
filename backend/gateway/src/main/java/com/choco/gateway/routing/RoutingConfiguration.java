@@ -50,7 +50,8 @@ public class RoutingConfiguration {
     @Bean
     RouterFunction<ServerResponse> identityRoutes(GatewayProperties properties) {
         return serviceRoute(properties, "identity",
-                "/api/v1/auth/**", "/api/v1/customers/**", "/.well-known/jwks.json");
+                "/api/v1/auth/**", "/api/v1/customers/**", "/api/v1/admin/customers/**",
+                "/.well-known/jwks.json");
     }
 
     @Bean

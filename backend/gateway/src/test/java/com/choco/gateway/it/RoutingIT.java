@@ -208,6 +208,26 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     }
 
     @Test
+    @DisplayName("an administrative customer request reaches the identity service")
+    void adminCustomersReachIdentityService() {
+        HttpResponse<String> response = get("/api/v1/admin/customers", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/admin/customers");
+    }
+
+    @Test
+    @DisplayName("the administrative customer surface is not public: no token is refused at the edge")
+    void adminCustomersAreNotPublic() throws Exception {
+        int before = IDENTITY.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/admin/customers", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(IDENTITY.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("a public serviceability request reaches the fulfilment service without a token")
     void serviceabilityReachesFulfilment() {
         HttpResponse<String> response = get("/api/v1/serviceability/560001", null);

@@ -20,6 +20,7 @@ final class AdminPermissions {
     static Set<String> forRole(AdminRole role) {
         if (role.isSuperAdmin()) {
             return Set.of(
+                    Roles.PERM_CUSTOMER_READ,
                     Roles.PERM_CUSTOMER_EXPORT,
                     Roles.PERM_PRODUCT_WRITE,
                     Roles.PERM_ORDER_WRITE,
@@ -33,6 +34,7 @@ final class AdminPermissions {
                     Roles.PERM_NOTIFICATION_WRITE);
         }
         return Set.of(
+                Roles.PERM_CUSTOMER_READ,
                 Roles.PERM_CUSTOMER_EXPORT,
                 Roles.PERM_PRODUCT_WRITE,
                 Roles.PERM_ORDER_WRITE,

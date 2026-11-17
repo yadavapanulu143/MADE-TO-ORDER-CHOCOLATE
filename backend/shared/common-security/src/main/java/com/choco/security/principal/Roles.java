@@ -13,6 +13,7 @@ public final class Roles {
     public static final String SUPER_ADMIN = "SUPER_ADMIN";
 
     /** Fine-grained admin permissions. ADMIN holds the day-to-day set; SUPER_ADMIN holds all. */
+    public static final String PERM_CUSTOMER_READ = "customer:read";
     public static final String PERM_CUSTOMER_EXPORT = "customer:export";
     public static final String PERM_PRODUCT_WRITE = "product:write";
     public static final String PERM_ORDER_WRITE = "order:write";

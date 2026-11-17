@@ -2,7 +2,10 @@ package com.choco.identity.application.service;
 
 import com.choco.core.error.ErrorCode;
 import com.choco.core.error.NotFoundException;
+import com.choco.core.page.PageResult;
+import com.choco.core.port.PageQuery;
 import com.choco.identity.application.dto.AddressView;
+import com.choco.identity.application.dto.CustomerSummaryView;
 import com.choco.identity.application.dto.CustomerView;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.port.AddressRepository;
@@ -46,6 +49,19 @@ public class CustomerQueryService {
      */
     public CustomerView findForAdmin(UUID customerId) {
         return findOwnProfile(customerId);
+    }
+
+    /**
+     * A page of customers for the seller, newest first, optionally narrowed by a search term.
+     *
+     * <p>Returns a summary rather than the full profile: the list can hold every customer, and the
+     * addresses and any future admin-only note belong to the single-customer read, not to a paged
+     * listing. The mapping here is the only place a row becomes a response, so no field can leak into
+     * the list by accident.
+     */
+    public PageResult<CustomerSummaryView> listForAdmin(String search, PageQuery page) {
+        return customerRepository.search(search, page)
+                .map(CustomerViews::summary);
     }
 
     private Customer require(UUID customerId) {

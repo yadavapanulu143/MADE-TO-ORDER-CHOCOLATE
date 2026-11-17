@@ -4,12 +4,20 @@ import com.choco.core.domain.EmailAddress;
 import com.choco.core.domain.PhoneNumber;
 import com.choco.core.error.ConflictException;
 import com.choco.core.error.ErrorCode;
+import com.choco.core.page.PageResult;
+import com.choco.core.port.PageQuery;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.port.CustomerRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * JPA implementation of {@link CustomerRepository}.
@@ -63,6 +71,41 @@ class CustomerRepositoryAdapter implements CustomerRepository {
     @Override
     public boolean existsByMobile(PhoneNumber mobile) {
         return delegate.existsByMobile(mobile.value());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<Customer> search(String search, PageQuery page) {
+        Page<CustomerJpaEntity> result = delegate.search(likePattern(search), toPageable(page));
+        List<Customer> customers = result.getContent().stream()
+                .map(PersistenceMapper::toDomain)
+                .toList();
+        return PageResult.of(customers, result.getNumber(), result.getSize(), result.getTotalElements());
+    }
+
+    /**
+     * Newest first, and only the columns the caller is allowed to sort by. An arbitrary sort field from
+     * a request would otherwise reach the query as a property name and fail at runtime.
+     */
+    private static Pageable toPageable(PageQuery query) {
+        return PageRequest.of(query.page(), query.size(), Sort.by(Sort.Direction.DESC, "registeredAt"));
+    }
+
+    /**
+     * Builds a case-insensitive contains-pattern for the search term, escaping the LIKE wildcards in the
+     * user's own term with {@code !} — the escape character declared on the query — so a term that
+     * happens to contain {@code %} or {@code _} is matched literally. An empty or absent term becomes
+     * {@code %} and matches everything, which expresses "no filter" without a nullable parameter.
+     */
+    private static String likePattern(String search) {
+        if (search == null || search.isBlank()) {
+            return "%";
+        }
+        String escaped = search.trim().toLowerCase(java.util.Locale.ROOT)
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+        return "%" + escaped + "%";
     }
 
     private ConflictException translate(Customer customer, DataIntegrityViolationException e) {

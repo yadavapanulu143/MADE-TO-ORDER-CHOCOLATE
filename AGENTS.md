@@ -342,6 +342,20 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     `NullPointerException` that dead-lettered every alert. A consumer that reads JSON by string key
     has no compiler to catch a rename; the integration test must assert on the rendered value, not
     only that a message arrived.
+42. **A seller-facing customer list is a different query from the customer's own read, and the search
+    term must be escaped.** `CustomerRepository.search` builds the `LIKE` pattern in the adapter
+    (`%term%`, empty term → `%`) and escapes `%`, `_` and the escape character itself, so a search for
+    `50%` matches literally and an absent term is not a nullable parameter. Passing the raw term to a
+    `LIKE` would let a customer's `%` match every account, and passing a nullable `:search` parameter
+    would repeat the catalog bug where PostgreSQL infers `bytea` and `lower(bytea)` does not exist.
+    The list also returns `CustomerSummaryView` — a record with no field for a hash, token or OTP — so
+    a leak into the paged listing is a compile error rather than a review item.
+43. **A read-only admin surface is authorised on the controller class, not on the URL pattern alone.**
+    `AdminCustomerController` carries `@PreAuthorize("hasAuthority('customer:read')")` at the class
+    level, so a new endpoint cannot be added to that class without inheriting an access decision, and
+    the permission is granted to both `ADMIN` and `SUPER_ADMIN` in `AdminPermissions.forRole`. The
+    gateway route and the public-path list are separate: `/api/v1/admin/customers/**` is routed at the
+    edge but is deliberately never public, and `RoutingIT` proves both halves.
 
 ## Payment service conventions
 
@@ -601,7 +615,7 @@ each module lands and as the deployment configuration is built.
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1195 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1212 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -612,10 +626,10 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
 | identity-domain | 56 |
-| identity-application | 136 |
+| identity-application | 145 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
-| identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
+| identity-app | 46 (6 unit + 40 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
 | catalog-domain | 19 |
 | catalog-application | 27 |
 | catalog-app | 30 (4 unit + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
@@ -628,7 +642,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 57 (16 unit + 41 integration: real Redis) |
+| gateway | 59 (16 unit + 43 integration: real Redis) |
 | fulfilment-domain | 88 |
 | fulfilment-application | 37 |
 | fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
@@ -639,7 +653,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1195** |
+| **total** | **1212** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently

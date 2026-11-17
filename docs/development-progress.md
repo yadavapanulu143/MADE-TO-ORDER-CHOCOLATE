@@ -527,8 +527,8 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (923 green across every module) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (272 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (932 green across every module) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (280 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
@@ -591,21 +591,48 @@ in front of it; the app does not claim to serve HTTPS itself.
 
 ## Phase 13 — Admin dashboard
 
-| # | Requirement | Status |
+The seller's dashboard is a React + Vite + TypeScript single-page app under `frontend/admin`. Like the
+storefront it talks only to the API gateway, and the permissions it reads from the access token are
+used to *hide* controls the server would refuse anyway — every administrative action is authorised
+again in the owning service.
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 13.1 | Dashboard cards (sales, orders, pending, etc.) | DONE | `DashboardPage` — the reporting service's `GET /api/v1/dashboard` metric cards |
+| 13.2 | Customer management + search | DONE | `CustomersPage` / `CustomerDetailPage` against the new `GET /api/v1/admin/customers` (paged, `?search=` over name/email/mobile, newest first) and `GET /api/v1/admin/customers/{id}`. Both require `customer:read`; the list returns a summary with no credential field, and the single read reuses the same profile shape the customer sees. The search term is escaped into a `LIKE` pattern in the adapter, so a term containing `%` or `_` matches literally. |
+| 13.3 | **Customer CSV export** | DONE | `ExportsPage` → `GET /api/v1/exports/customers?format=CSV` |
+| 13.4 | **Customer XLSX export** | DONE | `ExportsPage` → `GET /api/v1/exports/customers?format=XLSX` |
+| 13.5 | Export authorization + audit trail | DONE | The customer export needs `customer:export` beyond `report:read`; `AdminExportApiIT` proves a customer token is refused, the download is `no-store`, the email and mobile are masked, and an export writes an audit row naming the actor |
+| 13.6 | Product management | DONE | `ProductsPage` / `ProductDetailPage` — variants, prices, images, publish state |
+| 13.7 | Production management | DONE | `ProductionPage` / `ProductionJobPage` — the kitchen's job queue and the status machine; `InventoryPage` / `IngredientDetailPage` for stock |
+| 13.8 | Order management | DONE | `OrdersPage` / `OrderDetailPage` |
+| 13.9 | Payment management | DONE | `PaymentsPage` / `PaymentDetailPage` — counters, records, refund |
+| 13.10 | Delivery management | DONE | `DeliveriesPage` / `DeliveryDetailPage`, `ServiceableAreasPage` |
+| 13.11 | Invoice generation/download | DONE | The order service issues an invoice from a verified `payment.captured` (idempotent by order id, one invoice per order enforced by a unique index) and serves it at `/api/v1/invoices/me` (owner-scoped) and `/api/v1/admin/invoices` (seller). The document is a frozen snapshot of the order; `order.invoice-issued` is published for the notification service. `InvoicesPage` / `InvoiceDetailPage` render it. |
+| 13.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | DONE | `ReportsPage` → `GET /api/v1/reports/{type}` |
+| 13.13 | Website settings | DONE | `SettingsPage` → `GET`/`PUT /api/v1/settings` |
+| 13.14 | Notification management | DONE | `NotificationsPage` / `NotificationDetailPage` — the delivery log and the administrator resend |
+
+### What the admin dashboard tests pin down
+
+`npm test` in `frontend/admin` runs Vitest with jsdom and Testing Library: **10 files, 34 tests, all
+green**, with `tsc` type-checking clean and a production `vite build` succeeding. The network is the
+one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocked.
+
+| Area | Tests | What it proves |
 |---|---|---|
-| 13.1 | Dashboard cards (sales, orders, pending, etc.) | TODO |
-| 13.2 | Customer management + search | TODO |
-| 13.3 | **Customer CSV export** | TODO |
-| 13.4 | **Customer XLSX export** | TODO |
-| 13.5 | Export authorization + audit trail | TODO |
-| 13.6 | Product management | TODO |
-| 13.7 | Production management | TODO |
-| 13.8 | Order management | TODO |
-| 13.9 | Payment management | TODO |
-| 13.10 | Delivery management | TODO |
-| 13.11 | Invoice generation/download | DONE — the order service issues an invoice from a verified `payment.captured` (idempotent by order id, one invoice per order enforced by a unique index) and serves it at `/api/v1/invoices/me` (owner-scoped) and `/api/v1/admin/invoices` (seller). The document is a frozen snapshot of the order; `order.invoice-issued` is published for the notification service. See the invoice section below. |
-| 13.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | TODO |
-| 13.13 | Website settings | TODO |
+| `CustomersPage` | 4 | The list renders name, email, mobile and the verification state; an empty result shows a state; a partly verified account is reported as such rather than as verified; no credential material or password control is ever rendered |
+| `OrdersPage` | 3 | The order number, total and status render; an empty state appears; the status filter is sent to the server |
+| `DashboardPage`, `ExportsPage`, `PaymentDetailPage`, `NotificationDetailPage`, `LoginPage` | 20 | Metric cards render; an export is requested with the chosen format; a refund control is shown only with `payment:refund`; a delivered notification offers no resend while a failed one does; a sign-in failure renders the problem detail |
+| `format` | 7 | Paise render as Indian-grouped rupees; a date degrades to an em dash; a status is humanised |
+
+### New backend tests for the customer administration surface
+
+| Class | Tests | What it proves |
+|---|---|---|
+| `CustomerQueryServiceTest` (identity-application, unit) | 9 | The list pages newest-first and bounds the page; the summary carries only the recognition fields; the search matches a partial name case-insensitively and by email or mobile; a term matching nothing returns an empty page; an unknown id is a `404` |
+| `AdminCustomerApiIT` (identity-app, integration) | 6 | Over real HTTP against real PostgreSQL, Redis, RabbitMQ and the real filter chain: the seller lists and searches customers; a term containing a `%` is matched literally rather than as a wildcard; one customer's profile including addresses is read; an unknown id is a `404`; a customer token is refused (`403`) at both endpoints; an unauthenticated read is `401`; and no response body contains `passwordHash` |
+| `RoutingIT` (gateway, integration) | +2 | An administrator's `/api/v1/admin/customers` request reaches the identity service with its token intact, and the same path with no token is refused at the edge (401) without reaching the service |
 
 ## Phase 14 — Deployment preparation
 
@@ -654,10 +681,10 @@ in front of it; the app does not claim to serve HTTPS itself.
 | common-events | 6 | – | 6 |
 | common-redis | – | 4 | 4 |
 | identity-domain | 56 | – | 56 |
-| identity-application | 136 | – | 136 |
+| identity-application | 145 | – | 145 |
 | identity-adapters-out | 6 | – | 6 |
 | identity-adapters-in | 6 | – | 6 |
-| identity-app | 6 | 34 | 40 |
+| identity-app | 6 | 40 | 46 |
 | catalog-domain | 19 | – | 19 |
 | catalog-application | 27 | – | 27 |
 | catalog-app | 4 | 26 | 30 |
@@ -670,7 +697,7 @@ in front of it; the app does not claim to serve HTTPS itself.
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 16 | 41 | 57 |
+| gateway | 16 | 43 | 59 |
 | fulfilment-domain | 88 | – | 88 |
 | fulfilment-application | 37 | – | 37 |
 | fulfilment-app | 4 | 24 | 28 |
@@ -681,7 +708,7 @@ in front of it; the app does not claim to serve HTTPS itself.
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **923** | **272** | **1195** |
+| **Total** | **932** | **280** | **1212** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from

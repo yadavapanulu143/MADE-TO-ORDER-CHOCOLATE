@@ -1,6 +1,7 @@
 package com.choco.identity.application.service;
 
 import com.choco.identity.application.dto.AddressView;
+import com.choco.identity.application.dto.CustomerSummaryView;
 import com.choco.identity.application.dto.CustomerView;
 import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
@@ -37,5 +38,19 @@ final class CustomerViews {
         return new CustomerView(base.id(), base.fullName(), base.email(), base.mobile(),
                 base.emailVerified(), base.mobileVerified(), base.fullyVerified(), base.active(),
                 base.registeredAt(), List.copyOf(addresses));
+    }
+
+    /** The paged list row: the same recognition fields, without the addresses. */
+    static CustomerSummaryView summary(Customer customer) {
+        return new CustomerSummaryView(
+                customer.id(),
+                customer.contact().fullName(),
+                customer.contact().email().value(),
+                customer.contact().mobile().value(),
+                customer.isVerified(VerificationChannel.EMAIL),
+                customer.isVerified(VerificationChannel.MOBILE),
+                customer.fullyVerified(),
+                customer.isActive(),
+                customer.registeredAt());
     }
 }

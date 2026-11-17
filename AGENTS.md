@@ -31,7 +31,9 @@ integration and future session. They are not optional and are not renegotiated p
    asking.
    - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
      Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
-     the `fulfilment-service`)**. The next module is **Notification** (Phase 10).
+     the `fulfilment-service`) → Notification (done, the `notification-service`)**. The next module
+     is **Invoices, Reporting and Customer Exports** (Phase 11), then the Storefront (Phase 12) and
+     Admin Dashboard (Phase 13).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -415,9 +417,83 @@ seller-managed delivery in the same five-module shape as the others. Things spec
 - **A mapper that rebuilds an entity must carry the current `@Version` onto it,** exactly as in the
   other services, or optimistic locking silently stops working.
 
+## Notification service conventions
+
+The notification service (port 8086, database `choco_notification`) owns email and SMS fan-out. Things
+specific to it:
+
+- **A notification is an aggregate, not a log line.** The business needs to answer "was this order
+  confirmation ever sent, and how many times was it tried?" after the fact; a log line is rotated
+  away, a row survives.
+- **Deduplication is part of the identity.** Every notification carries a `dedupe_key` derived from
+  the producing event id and type, and the database enforces it unique. A broker redelivery — normal,
+  not exceptional — therefore cannot send a customer a second order confirmation.
+- **The message is rendered before it is stored.** The subject and body are the finished text, so a
+  retry re-sends exactly what the customer would have received, and a later template change cannot
+  rewrite the history of what was sent.
+- **`FAILED` is a resting state, not a transient one.** A failed attempt stays `FAILED` — visible in
+  the seller's log and resendable — and the retry query selects both `PENDING` and `FAILED` due rows.
+  A re-failed retry does not re-run the `→ PENDING` transition (a guarded self-transition). Once the
+  attempt budget is spent the notification is `DEAD_LETTER`, and the only way out is an administrator
+  resend, which resets the attempt counter so the message gets a full budget rather than immediately
+  dead-lettering again.
+- **A provider failure is never a business failure.** The consumer records the failure and returns;
+  nothing in the path writes to order or payment state, so a mail outage cannot un-pay an order. The
+  stored error is a bounded, provider-neutral summary — never a raw transport error that echoes the
+  recipient's address.
+- **The admin log is `/api/v1/admin/notifications`,** gated by `notification:read` /
+  `notification:write` and routed by the gateway. The public path list never opens it.
+
+## ACID Compliance and Distributed Transaction Consistency
+
+This section is permanent and must stay current as modules land.
+
+**Local ACID, per service database.** Every service owns one PostgreSQL database and never writes
+another's. Business invariants are enforced by the schema (primary keys, foreign keys, unique, check
+and not-null constraints) *and* by the domain — the database is the last line, not the only one.
+Optimistic locking (`@Version`) guards concurrent edits; a mapper that rebuilds an entity must carry
+the current version across or locking silently stops working (a bug already hit in catalog). Reads
+that touch lazy collections run in a read-only transaction. Money is integer paise; stock is
+milli-units; no `double` arithmetic can drift.
+
+**Distributed consistency across services.** Independent databases cannot share one ACID transaction,
+so consistency is eventual and is built from:
+
+- **Transactional outbox.** A producer writes the event to an `outbox_event` row *inside the same
+  transaction* as the state change; a relay publishes it and marks it sent. This removes the dual-write
+  window where the commit fails but the message is already gone. The relay query uses
+  `FOR UPDATE SKIP LOCKED`, safe on several replicas.
+- **Idempotent consumers keyed by event id.** A redelivered event finds the work it already did and
+  does nothing new — one production job per line, one delivery per order, one notification per dedupe
+  key.
+- **Durable queues, bounded retry, dead-letter.** One durable topic exchange; each consumer has a
+  durable queue, a retry queue with TTL and a shared dead-letter queue. Bounded retry (3 attempts,
+  1s→2s backoff, 10s cap) then `default-requeue-rejected: false`, so a poison message dead-letters
+  instead of looping.
+- **The order→payment→production saga is closed by events, not HTTP.** The order service freezes the
+  total and asks payment-service to collect exactly that amount; payment-service verifies a capture
+  against the amount it was asked to collect; the order service consumes `payment.captured` and moves
+  the order's state from the event alone, refusing a capture whose amount is not the order's frozen
+  total (`PAYMENT_AMOUNT_MISMATCH`); fulfilment opens a job from `order.confirmed`. There is
+  deliberately no synchronous "mark paid" endpoint.
+- **Never hold a transaction open across a network call.**
+
+**Evidence.** Commit/rollback and constraint violations are proven by every `SchemaAndPersistenceIT`;
+optimistic locking by the mapper-version tests; concurrent processing by `OrderPaymentIT` (two
+simultaneous payment starts) and `FulfilmentJourneyIT` (idempotent consumption over a real broker);
+outbox atomicity and publication by `OutboxRelayIT`; duplicate webhook and verify idempotency by
+`PaymentJourneyIT`; provider-failure isolation by `NotificationJourneyIT`. Backups and recovery are
+documented with deployment (Phase 14) and are not yet verified end to end.
+
+## Security review
+
+`docs/security-review.md` holds the security architecture, the findings by severity with evidence, the
+fixes, the remaining risks and the maintenance procedure. It is a living document and is updated as
+each module lands and as the deployment configuration is built.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **907 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1037 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -427,33 +503,42 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | common-security | 23 |
 | common-events | 6 |
 | common-redis | 4 (integration, real Redis) |
-| identity-domain | 52 |
-| identity-application | 132 |
+| identity-domain | 56 |
+| identity-application | 136 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
 | identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
 | catalog-domain | 19 |
 | catalog-application | 27 |
 | catalog-app | 30 (4 unit + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
-| order-domain | 98 |
-| order-application | 54 |
-| order-adapters-out | 11 (real HTTP server) |
-| order-app | 39 (integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
+| order-domain | 108 |
+| order-application | 64 |
+| order-adapters-out | 14 (real HTTP server) |
+| order-adapters-in | 8 |
+| order-app | 60 (4 architecture + 56 integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
 | payment-domain | 40 |
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| api-gateway | 43 (14 unit + 29 integration: real Redis) |
+| gateway | 47 (15 unit + 32 integration: real Redis) |
 | fulfilment-domain | 86 |
 | fulfilment-application | 36 |
 | fulfilment-app | 27 (4 architecture + 23 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **907** |
+| notification-domain | 13 |
+| notification-application | 35 |
+| notification-app | 20 (4 architecture + 16 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| **total** | **1037** |
+
+**Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
+writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
+undercounts; the module-level `Results:` line is the authoritative figure. An earlier revision of this
+table claimed 907, which was such a sum.
 
 An earlier revision of this table claimed 446, counting the gateway's unit tests as 35. That number
 was wrong. `GatewayPropertiesTest` has always held 14 `@Test` methods — 13 when it was first added
-(`a69f8f2`) and 14 after the admin-route test landed — and no gateway test file was ever deleted in
-the repository's history. The corrected total is 425, and a full `mvn clean verify` reports exactly
-that with nothing skipped. Keep this number tied to a run, not to a hand edit.
+(`a69f8f2`), 14 after the admin-route test landed, and 15 after the admin-refresh test — and no
+gateway test file was ever deleted in the repository's history. Keep this number tied to a run, not
+to a hand edit.
 
 ### API Gateway tests (`*IT`, run by `mvn verify`)
 
@@ -539,6 +624,30 @@ chain verifies.
   uncovered one with a reason, and the customer/admin boundary holds.
 - `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
   persistence technology; inbound adapters do not reach into persistence.
+
+`notification-app` carries its own integration tests under `src/test/java/com/choco/notification/it`
+(`AbstractNotificationIntegrationTest` starts real PostgreSQL, RabbitMQ and Redis, serves the service
+on a random port, and points the mail sender at a GreenMail SMTP sink on fixed port 3025). Events are
+published as real envelopes to the exchange the listener binds, so the consumer path is exercised end
+to end.
+
+- `SchemaAndPersistenceIT` — Flyway applied V1, Hibernate `validate` passes, and the database-level
+  constraints reject a negative attempt count, a blank dedupe key, an out-of-range status and a
+  duplicate dedupe key (the idempotency guard).
+- `NotificationJourneyIT` — a real event on the broker becomes one message in the SMTP sink: the
+  greeting is filled from the contact projection, the dedupe key suppresses a redelivery, and a
+  provider outage is recorded on the notification rather than thrown.
+- `AdminNotificationApiIT` — the admin log over real HTTP: list, counters and read are permission
+  gated, a customer is refused, an unknown id is a 404, a delivered notification cannot be resent
+  (409) and a customer cannot trigger a resend (403).
+- `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
+  provider SDK; the mail/SMS sender never leaks into the domain.
+
+**`FAILED` is a resting status.** A notification that exhausts its retry budget stays `FAILED` rather
+than falling back to `PENDING`, so a failure is visible in the admin log and resendable. The retry
+query selects both `PENDING` and `FAILED` due rows, and a re-failed notification does not re-run the
+`→ PENDING` transition (guarded self-transition). The admin log lives at `/api/v1/admin/notifications`
+and is routed by the gateway; its authorities are `notification:read` / `notification:write`.
 
 ## Local dev services
 

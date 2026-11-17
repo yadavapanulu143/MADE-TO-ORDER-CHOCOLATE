@@ -81,6 +81,17 @@ class GatewayPropertiesTest {
         }
 
         @Test
+        void opensAdminRefreshAndLogoutWithoutAnAccessToken() {
+            GatewayProperties properties = new GatewayProperties();
+
+            // A refresh token is not an access token, so the request that carries it has no bearer
+            // credential. If these paths were not public at the edge, an administrator's session
+            // could never be renewed or revoked through the gateway.
+            assertThat(properties.getPublicPaths())
+                    .contains("/api/v1/auth/admin/refresh", "/api/v1/auth/admin/logout");
+        }
+
+        @Test
         void doesNotOpenTheAdministrativeCatalogue() {
             GatewayProperties properties = new GatewayProperties();
 

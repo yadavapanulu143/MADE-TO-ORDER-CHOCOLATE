@@ -50,6 +50,7 @@ class ProfileServiceTest {
     private List<VerificationChannel> deliveredChannels;
     private List<String> deliveredCodes;
     private List<String[]> auditRecords;
+    private Fakes.RecordingEventPublisher events;
     private ProfileService service;
     private final UUID asha = UUID.randomUUID();
     private final UUID bhavna = UUID.randomUUID();
@@ -88,8 +89,9 @@ class ProfileServiceTest {
             }
         };
 
+        events = new Fakes.RecordingEventPublisher();
         service = new ProfileService(customers, challenges, otpCodes, delivery, auditLog,
-                new Fakes.RecordingEventPublisher(),
+                events,
                 new SnapshottingTransactionRunner(customers, challenges),
                 new Fakes.SequentialIdGenerator(), new Fakes.FixedClock(NOW));
     }
@@ -213,6 +215,35 @@ class ProfileServiceTest {
             assertThat(deliveredDestinations).containsExactly("new@example.com");
             assertThat(deliveredChannels).containsExactly(VerificationChannel.EMAIL);
             assertThat(deliveredCodes).isNotEmpty();
+        }
+
+        @Test
+        @DisplayName("a contact change is published so the notification projection re-addresses the customer")
+        void contactChangeIsPublished() {
+            seedCustomer(asha, "asha@example.com", "9876543210", true);
+
+            service.changeContact(asha, new ChangeContactCommand("new@example.com", null));
+
+            assertThat(events.eventsOfType("customer.contact-changed"))
+                    .as("without this event the notification service keeps the old address")
+                    .singleElement()
+                    .satisfies(event -> {
+                        var changed = (com.choco.identity.domain.event.CustomerContactChanged) event;
+                        assertThat(changed.email()).isEqualTo("new@example.com");
+                        assertThat(changed.mobile()).isEqualTo("9876543210");
+                    });
+        }
+
+        @Test
+        @DisplayName("resubmitting the current address publishes nothing")
+        void resubmittingTheSameAddressPublishesNothing() {
+            seedCustomer(asha, "asha@example.com", "9876543210", true);
+
+            service.changeContact(asha, new ChangeContactCommand("asha@example.com", "9876543210"));
+
+            assertThat(events.eventsOfType("customer.contact-changed"))
+                    .as("an unchanged address must not churn the projection or send a code")
+                    .isEmpty();
         }
 
         @Test

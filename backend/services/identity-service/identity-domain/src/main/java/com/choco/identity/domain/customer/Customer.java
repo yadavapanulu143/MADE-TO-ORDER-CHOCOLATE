@@ -5,6 +5,7 @@ import com.choco.core.domain.EmailAddress;
 import com.choco.core.domain.PhoneNumber;
 import com.choco.core.error.BusinessRuleException;
 import com.choco.core.error.ErrorCode;
+import com.choco.identity.domain.event.CustomerContactChanged;
 import com.choco.identity.domain.event.CustomerPasswordChanged;
 import com.choco.identity.domain.event.CustomerRegistered;
 import com.choco.identity.domain.event.CustomerVerified;
@@ -121,6 +122,7 @@ public class Customer extends AggregateRoot {
         this.contact = new ContactDetails(email, contact.mobile(), contact.fullName());
         this.verifiedChannels.remove(VerificationChannel.EMAIL);
         this.updatedAt = now;
+        raiseContactChanged(now);
     }
 
     /** Changes the mobile number and clears the mobile verification; see {@link #changeEmail}. */
@@ -128,6 +130,20 @@ public class Customer extends AggregateRoot {
         this.contact = new ContactDetails(contact.email(), mobile, contact.fullName());
         this.verifiedChannels.remove(VerificationChannel.MOBILE);
         this.updatedAt = now;
+        raiseContactChanged(now);
+    }
+
+    /**
+     * Announces the customer's current contact details.
+     *
+     * <p>A separate event rather than a field on the verification event, because the notification
+     * service needs the new address to send anything at all, and a full snapshot lets its projection
+     * be a simple overwrite. Only a genuine change reaches here — the callers compare before calling —
+     * so a resubmitted unchanged address does not emit an event.
+     */
+    private void raiseContactChanged(Instant now) {
+        registerEvent(new CustomerContactChanged(UUID.randomUUID(), now, id.toString(),
+                contact.email().value(), contact.mobile().value(), contact.fullName()));
     }
 
     /** Records a failed login and locks the account once the threshold is reached. */

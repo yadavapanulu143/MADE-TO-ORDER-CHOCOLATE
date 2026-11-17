@@ -254,6 +254,63 @@ class CustomerTest {
     }
 
     @Test
+    void changing_the_email_raises_a_contact_changed_event_carrying_the_current_details() {
+        Customer customer = newCustomer();
+        customer.pullDomainEvents();
+
+        customer.changeEmail(EmailAddress.of("new@example.com"), NOW);
+
+        assertThat(customer.peekDomainEvents())
+                .filteredOn(e -> e instanceof com.choco.identity.domain.event.CustomerContactChanged)
+                .singleElement()
+                .satisfies(e -> {
+                    var event = (com.choco.identity.domain.event.CustomerContactChanged) e;
+                    assertThat(event.email()).isEqualTo("new@example.com");
+                    assertThat(event.mobile())
+                            .as("the event carries a full snapshot, not only the changed field")
+                            .isEqualTo("9876543210");
+                    assertThat(event.fullName()).isEqualTo("Asha Menon");
+                });
+    }
+
+    @Test
+    void changing_the_mobile_raises_a_contact_changed_event() {
+        Customer customer = newCustomer();
+        customer.pullDomainEvents();
+
+        customer.changeMobile(PhoneNumber.of("9123456780"), NOW);
+
+        assertThat(customer.peekDomainEvents())
+                .extracting(DomainEvent::eventType)
+                .containsExactly("customer.contact-changed");
+    }
+
+    @Test
+    void a_contact_change_event_carries_no_credential_material() {
+        Customer customer = newCustomer();
+        customer.pullDomainEvents();
+
+        customer.changeEmail(EmailAddress.of("new@example.com"), NOW);
+
+        assertThat(customer.peekDomainEvents().getFirst().toString())
+                .as("the notification service needs an address, never a hash")
+                .doesNotContain("argon2id")
+                .doesNotContain("hash");
+    }
+
+    @Test
+    void changing_only_the_full_name_raises_no_contact_changed_event() {
+        Customer customer = newCustomer();
+        customer.pullDomainEvents();
+
+        customer.changeFullName("Asha R Menon", NOW);
+
+        assertThat(customer.peekDomainEvents())
+                .as("the projection is keyed on where to reach the customer, which did not change")
+                .isEmpty();
+    }
+
+    @Test
     void changing_the_full_name_rejects_a_blank_value() {
         Customer customer = newCustomer();
 

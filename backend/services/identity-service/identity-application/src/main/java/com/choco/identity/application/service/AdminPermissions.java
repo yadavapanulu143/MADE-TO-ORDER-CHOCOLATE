@@ -28,7 +28,9 @@ final class AdminPermissions {
                     Roles.PERM_PRODUCTION_WRITE,
                     Roles.PERM_REPORT_READ,
                     Roles.PERM_SETTINGS_WRITE,
-                    Roles.PERM_ADMIN_MANAGE);
+                    Roles.PERM_ADMIN_MANAGE,
+                    Roles.PERM_NOTIFICATION_READ,
+                    Roles.PERM_NOTIFICATION_WRITE);
         }
         return Set.of(
                 Roles.PERM_CUSTOMER_EXPORT,
@@ -36,6 +38,8 @@ final class AdminPermissions {
                 Roles.PERM_ORDER_WRITE,
                 Roles.PERM_DELIVERY_WRITE,
                 Roles.PERM_PRODUCTION_WRITE,
-                Roles.PERM_REPORT_READ);
+                Roles.PERM_REPORT_READ,
+                Roles.PERM_NOTIFICATION_READ,
+                Roles.PERM_NOTIFICATION_WRITE);
     }
 }

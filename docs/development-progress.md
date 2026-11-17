@@ -406,26 +406,48 @@ configured for the variant. A variant with no recipe consumes nothing.
 
 ## Phase 10 — Notifications
 
+The `notification-service` (port 8086, database `choco_notification`) is implemented and verified.
+It consumes platform events on its own durable queue, renders the message from a template, records it
+as an aggregate with a deduplication key, and hands it to a configurable email or SMS provider. The
+admin delivery log is exposed at `/api/v1/admin/notifications`, permission-gated and routed by the
+gateway.
+
 | # | Requirement | Status |
 |---|---|---|
-| 10.1 | Email provider (configurable) | TODO |
-| 10.2 | SMS provider (configurable) | TODO |
-| 10.3 | Registration/verification notifications | TODO |
-| 10.4 | Order + payment notifications | TODO |
-| 10.5 | Production + delivery notifications | TODO |
-| 10.6 | Cancellation/refund notifications | TODO |
+| 10.1 | Email provider (configurable) | DONE — SMTP sender, host/port/credentials from environment; a test sink stands in for a provider |
+| 10.2 | SMS provider (configurable) | DONE — HTTP gateway sender; with no gateway URL configured, sends are logged and reported, never fabricated |
+| 10.3 | Registration/verification notifications | DONE — `customer.registered` (greeting) and `customer.verified`; a contact change re-issues the greeting |
+| 10.4 | Order + payment notifications | DONE — `order.placed`, `order.confirmed`, `order.cancelled`, `payment.captured`, `payment.failed`, `payment.pending` |
+| 10.5 | Production + delivery notifications | DONE — `production.started/completed`, `packaging.completed`, `ready-for-dispatch`, `delivery.assigned/out-for-delivery/delivered/failed` |
+| 10.6 | Cancellation/refund notifications | DONE — `refund.requested` and `dispute.raised` to the seller; `refund.processed` to the customer |
+| 10.7 | Configurable templates and provider configuration | DONE — templates in the application layer; provider settings from environment variables |
+| 10.8 | Delivery status tracking | DONE — every notification's status and attempt count is visible in the admin log |
+| 10.9 | Idempotency and duplicate-event protection | DONE — a `dedupe_key` derived from event id + type is unique at the database; a redelivery creates no second message |
+| 10.10 | Durable RabbitMQ event handling | DONE — durable queue, manual-safe acknowledge, `prefetch: 1`, retry with backoff, dead-letter on exhaustion |
+| 10.11 | Bounded retries and dead-letter handling | DONE — `FAILED` is a resting state (visible and resendable); the retry query selects `PENDING` and `FAILED`; budget exhausted → `DEAD_LETTER` |
+| 10.12 | Secure logging without sensitive information | DONE — a provider failure is stored as a bounded, provider-neutral summary, never a raw transport error with the address in it |
+| 10.13 | A provider failure must not reverse an order or payment | DONE — the consumer records the failure on the notification and returns; nothing in the path writes to order or payment state |
+
+### Notification integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 5 | Flyway applied V1; Hibernate `validate` matches; a negative attempt count, a blank dedupe key and an out-of-range status are rejected, and a duplicate dedupe key is refused by the unique index |
+| NotificationJourneyIT | 4 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, and a provider outage is recorded rather than thrown |
+| AdminNotificationApiIT | 7 | The admin log over real HTTP: list, counters and read are permission gated; a customer is refused; an unknown id is a 404; a delivered notification cannot be resent (409); a customer cannot trigger a resend (403) |
+| CleanArchitectureTest | 4 | The domain and application layers depend on no framework, adapter or provider SDK; the mail/SMS sender never leaks into the domain |
 
 ## Phase 11 — Testing and quality
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (626 green: common + identity + catalog + order + payment) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (154 green: real PostgreSQL, Redis, RabbitMQ across identity, catalog, order and payment services) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (818 green across every module) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (215 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification and the gateway) |
 | 11.3 | End-to-end workflows | TODO |
-| 11.4 | Concurrent order processing test | TODO |
-| 11.5 | Payment verification test | TODO |
-| 11.6 | Data privacy / export test | TODO |
-| 11.7 | Security tests | TODO |
+| 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
+| 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
+| 11.6 | Data privacy / export test | TODO — arrives with the customer export in Phase 11 |
+| 11.7 | Security tests | IN PROGRESS — authz boundaries, ownership isolation and rate limiting are covered per service; a consolidated suite and `docs/security-review.md` are pending |
 
 ## Phase 12 — Deployment preparation
 
@@ -466,34 +488,44 @@ configured for the variant. A variant with no recipe consumes nothing.
 
 ## Test tally
 
-| Module | Tests | Status |
-|---|---|---|
-| common-core | 40 | green |
-| common-web | 7 | green |
-| common-security | 23 | green |
-| common-events | 6 | green |
-| common-redis | 4 (integration) | green |
-| identity-domain | 52 | green |
-| identity-application | 132 | green |
-| identity-adapters-out | 6 | green |
-| identity-adapters-in | 6 | green |
-| identity-app | 40 (6 unit + 34 integration) | green |
-| catalog-domain | 19 | green |
-| catalog-application | 27 | green |
-| catalog-app | 30 (4 unit + 26 integration) | green |
-| order-domain | 98 | green |
-| order-application | 54 | green |
-| order-adapters-out | 11 | green |
-| order-app | 39 (integration) | green |
-| payment-domain | 40 | green |
-| payment-application | 31 | green |
-| payment-adapters-out | 18 | green |
-| payment-app | 30 (5 unit + 25 integration) | green |
-| api-gateway | 43 (14 unit + 29 integration) | green |
-| fulfilment-domain | 86 | green |
-| fulfilment-application | 36 | green |
-| fulfilment-app | 27 (4 unit + 23 integration) | green |
-| **Total** | **907** | **green** |
+| Module | Unit | Integration | Total |
+|---|---|---|---|
+| common-core | 40 | – | 40 |
+| common-web | 7 | – | 7 |
+| common-security | 23 | – | 23 |
+| common-events | 6 | – | 6 |
+| common-redis | – | 4 | 4 |
+| identity-domain | 56 | – | 56 |
+| identity-application | 136 | – | 136 |
+| identity-adapters-out | 6 | – | 6 |
+| identity-adapters-in | 6 | – | 6 |
+| identity-app | 6 | 34 | 40 |
+| catalog-domain | 19 | – | 19 |
+| catalog-application | 27 | – | 27 |
+| catalog-app | 4 | 26 | 30 |
+| order-domain | 108 | – | 108 |
+| order-application | 64 | – | 64 |
+| order-adapters-in | 8 | – | 8 |
+| order-adapters-out | 14 | – | 14 |
+| order-app | 4 | 56 | 60 |
+| payment-domain | 40 | – | 40 |
+| payment-application | 31 | – | 31 |
+| payment-adapters-out | 18 | – | 18 |
+| payment-app | 5 | 25 | 30 |
+| gateway | 15 | 32 | 47 |
+| fulfilment-domain | 86 | – | 86 |
+| fulfilment-application | 36 | – | 36 |
+| fulfilment-app | 4 | 23 | 27 |
+| notification-domain | 13 | – | 13 |
+| notification-application | 35 | – | 35 |
+| notification-app | 4 | 16 | 20 |
+| **Total** | **821** | **216** | **1037** |
+
+Counts come from `mvn clean verify` at `backend/` plus the two gateway tests added with the
+admin-refresh route fix; every suite reported 0 failures, 0 errors, 0 skipped. Treat this as a map of
+where the tests are, not a number to keep in sync by hand. Tally from each module's `Results:` block:
+a nested `@Nested` class writes its own report file, so summing report files undercounts and a naive
+per-file sum is not the total.
 
 ### API Gateway integration tests (`mvn verify`)
 

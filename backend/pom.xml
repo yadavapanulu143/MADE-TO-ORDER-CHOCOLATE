@@ -36,7 +36,7 @@
     <module>services/order-service</module>
     <module>services/payment-service</module>
     <module>services/fulfilment-service</module>
-    <!-- <module>services/notification-service</module> -->
+    <module>services/notification-service</module>
     <!-- <module>services/reporting-service</module> -->
   </modules>
 
@@ -286,6 +286,28 @@
       <dependency>
         <groupId>com.choco</groupId>
         <artifactId>fulfilment-adapters-in</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Notification service layers -->
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>notification-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>notification-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>notification-adapters-out</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>notification-adapters-in</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

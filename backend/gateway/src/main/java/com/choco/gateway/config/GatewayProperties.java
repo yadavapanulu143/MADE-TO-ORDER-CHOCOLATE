@@ -29,11 +29,20 @@ public class GatewayProperties {
      * <p>Declared explicitly rather than derived from a wildcard, so widening public access is a
      * visible edit in configuration. The list mirrors the identity service's own public paths plus
      * the read-only catalogue and the serviceability probe the storefront needs before sign-in.
+     *
+     * <p>Every path here is unauthenticated because the caller has no token yet, or is presenting a
+     * refresh token instead of an access token: sign-in, registration, the refresh and logout pair
+     * for both audiences, the password-reset pair, and the public key the other services fetch. The
+     * administrator refresh and logout paths are listed for the same reason the customer ones are —
+     * an administrator's session must be renewable and revocable at the edge, and a refresh token is
+     * not an access token, so it cannot authenticate the request that carries it.
      */
     private List<String> publicPaths = new ArrayList<>(List.of(
             "/api/v1/auth/register",
             "/api/v1/auth/login",
             "/api/v1/auth/admin/login",
+            "/api/v1/auth/admin/refresh",
+            "/api/v1/auth/admin/logout",
             "/api/v1/auth/refresh",
             "/api/v1/auth/logout",
             "/api/v1/auth/password-reset/request",

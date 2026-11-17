@@ -12,6 +12,7 @@ public final class EventTypes {
     public static final String CUSTOMER_REGISTERED = "customer.registered";
     public static final String CUSTOMER_VERIFIED = "customer.verified";
     public static final String CUSTOMER_PASSWORD_CHANGED = "customer.password-changed";
+    public static final String CUSTOMER_CONTACT_CHANGED = "customer.contact-changed";
 
     // catalog-service
     public static final String PRODUCT_CREATED = "catalog.product-created";

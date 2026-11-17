@@ -26,6 +26,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     private static final MockWebServer CATALOG = downstream();
     private static final MockWebServer ORDER = downstream();
     private static final MockWebServer FULFILMENT = downstream();
+    private static final MockWebServer NOTIFICATION = downstream();
 
     private static MockWebServer downstream() {
         MockWebServer server = new MockWebServer();
@@ -53,6 +54,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         registry.add("choco.gateway.services.catalog", () -> CATALOG.url("/").toString());
         registry.add("choco.gateway.services.order", () -> ORDER.url("/").toString());
         registry.add("choco.gateway.services.fulfilment", () -> FULFILMENT.url("/").toString());
+        registry.add("choco.gateway.services.notification", () -> NOTIFICATION.url("/").toString());
     }
 
     @AfterAll
@@ -61,6 +63,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         CATALOG.shutdown();
         ORDER.shutdown();
         FULFILMENT.shutdown();
+        NOTIFICATION.shutdown();
     }
 
     @Test
@@ -83,6 +86,21 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         // The token must survive the hop: the downstream service verifies it again and performs the
         // ownership check, so stripping it here would turn every authenticated call into a 401.
         assertThat(body.get("authorization").asText()).startsWith("Bearer ");
+    }
+
+    @Test
+    @DisplayName("an administrator can refresh and log out at the edge without an access token")
+    void adminRefreshAndLogoutReachIdentityWithoutAToken() {
+        // A refresh token is not an access token, so the request carrying it has no bearer credential.
+        // Both paths must be public at the edge or an administrator's session could never be renewed
+        // or revoked through the gateway — the very failure the customer refresh/logout pair avoids.
+        HttpResponse<String> refresh = post("/api/v1/auth/admin/refresh", "{}", null);
+        assertThat(refresh.statusCode()).isEqualTo(200);
+        assertThat(json(refresh).get("path").asText()).isEqualTo("/api/v1/auth/admin/refresh");
+
+        HttpResponse<String> logout = post("/api/v1/auth/admin/logout", "{}", null);
+        assertThat(logout.statusCode()).isEqualTo(200);
+        assertThat(json(logout).get("path").asText()).isEqualTo("/api/v1/auth/admin/logout");
     }
 
     @Test
@@ -221,6 +239,26 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
 
         // No route matches, so the gateway itself answers 404 rather than guessing a service.
         assertThat(response.statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    @DisplayName("the administrative notification log reaches the notification service")
+    void adminNotificationReachesNotificationService() {
+        HttpResponse<String> response = get("/api/v1/admin/notifications", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/admin/notifications");
+    }
+
+    @Test
+    @DisplayName("the administrative notification log is not public: no token is refused at the edge")
+    void adminNotificationIsNotPublic() throws Exception {
+        int before = NOTIFICATION.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/admin/notifications", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(NOTIFICATION.getRequestCount()).isEqualTo(before);
     }
 
     @Test

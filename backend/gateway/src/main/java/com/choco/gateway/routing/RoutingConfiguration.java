@@ -83,7 +83,8 @@ public class RoutingConfiguration {
 
     @Bean
     RouterFunction<ServerResponse> notificationRoutes(GatewayProperties properties) {
-        return serviceRoute(properties, "notification", "/api/v1/notifications/**");
+        return serviceRoute(properties, "notification",
+                "/api/v1/notifications/**", "/api/v1/admin/notifications/**");
     }
 
     @Bean

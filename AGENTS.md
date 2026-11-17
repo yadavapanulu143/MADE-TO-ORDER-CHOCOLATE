@@ -281,6 +281,35 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     endpoint serves; the real public read is `/api/v1/settings`. `GatewayPropertiesTest` now asserts the
     admin prefix is never public and `RoutingIT` proves the admin route is proxied and gated.
 
+34. **A status transition table is only as complete as its entries.** The order domain's
+    `PREPARATION_STARTED → PREPARATION_ON_HOLD` edge was missing, so an order already being prepared
+    could not be put on hold — exactly the case an ingredient shortage creates. The domain test caught
+    it because it exercised the whole lifecycle rather than only the happy path. When adding a state,
+    enumerate every edge into and out of it, not just the forward one.
+
+35. **Check for a conflict before an idempotency shortcut, never after.** `Order.markPaid` returned
+    early when the order was already paid, which swallowed a confirmation naming a *different* payment
+    id instead of refusing it. The order is to test the inconsistent case first, then take the
+    idempotent path: a duplicate of the same request is a replay, but a different request that lands in
+    the same slot is corruption.
+
+## Order service conventions
+
+The order service follows the same five-module shape as identity and catalog. Things specific to it:
+
+- **Three status tracks, one status.** `PaymentStatus`, `PreparationStatus` and `DeliveryStatus` advance
+  independently; `OrderStatus` is the projection a customer reads. Never collapse them — "paid but not
+  started" must be representable.
+- **`Order.transitionTo` is the only writer of the overall status.** Every lifecycle move goes through
+  it, and it consults `OrderStatus.canTransitionTo`. A new admin or payment endpoint must call an
+  aggregate method, never set the status directly, or the made-to-order rule can be bypassed.
+- **An order is a snapshot.** Names, labels, SKUs and unit prices are copied at checkout and never
+  re-read from the catalogue. A price change after the fact must not alter a placed order.
+- **Payment state is a projection of a verified fact.** Nothing in this service decides a payment
+  succeeded; a `payment.captured` event from the payment service does. A browser redirect is never
+  trusted.
+- **Money stays in paise.** `Money.inr(...)`, integer arithmetic, no `double` anywhere.
+
 ## Test tally
 
 `mvn clean verify` at `backend/`: **425 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work

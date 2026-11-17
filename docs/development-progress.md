@@ -108,12 +108,41 @@ credential handling was performed.
 
 | # | Requirement | Status |
 |---|---|---|
-| 5.1 | Shopping cart | TODO |
-| 5.2 | Quantity management + configurable limits | TODO |
-| 5.3 | Checkout validation (availability, quantity, verification, address, PIN) | TODO |
-| 5.4 | Order creation with immutable price snapshot | TODO |
-| 5.5 | Order history (own orders only) | TODO |
-| 5.6 | Order status transitions + history | TODO |
+| 5.1 | Shopping cart | IN PROGRESS |
+| 5.2 | Quantity management + configurable limits | IN PROGRESS |
+| 5.3 | Checkout validation (availability, quantity, verification, address, PIN) | IN PROGRESS |
+| 5.4 | Order creation with immutable price snapshot | IN PROGRESS |
+| 5.5 | Order history (own orders only) | IN PROGRESS |
+| 5.6 | Order status transitions + history | IN PROGRESS |
+
+**Order Management Service (Phase 5).** A new five-module Clean Architecture service under
+`backend/services/order-service/` (`order-domain`, `order-application`, `order-adapters-out`,
+`order-adapters-in`, `order-app`), added to the parent reactor and to `dependencyManagement`.
+
+Milestone 5a — domain layer (done, framework-free; enforcer rule passes):
+
+- `Order` aggregate: priced lines, frozen delivery address and customer snapshot, and three separate
+  tracks (payment, preparation, delivery) folded into one `OrderStatus`. The single invariant that
+  matters most is enforced in one place — `transitionTo` consults `OrderStatus.canTransitionTo`, so an
+  order can never be prepared before a verified payment confirms it. Product names, labels, SKUs and
+  unit prices are snapshots taken at checkout and never re-read, so a later catalogue change cannot
+  rewrite what a customer agreed to pay.
+- `Cart` aggregate: one active cart per customer; the same variant added twice increments one line;
+  the per-line ceiling and line count are bounded; display prices are refreshed from the catalogue.
+- `OrderStatus` (17 values) with an explicit transition table; `PaymentStatus`, `PreparationStatus`,
+  `DeliveryStatus` as the independent tracks; `OrderLine`, `DeliveryAddress`, `CustomerSnapshot`,
+  `StatusChange`, `OrderNote`, `IdempotencyRecord` value objects.
+- Domain events: `order.placed`, `order.confirmed`, `order.status-changed`, `order.cancelled`,
+  `order.refund-requested`.
+- 98 domain unit tests, all passing.
+
+Two bugs the domain tests caught and fixed before anything shipped:
+
+1. `PREPARATION_STARTED → PREPARATION_ON_HOLD` was missing from the transition table, so holding a
+   started order was impossible — the exact case an ingredient shortage creates.
+2. `markPaid` short-circuited on the idempotency check before the conflict check, so a confirmation
+   naming a *different* payment for an already-paid order was silently swallowed instead of refused.
+   The conflict check now runs first; a duplicate confirmation of the same payment is still idempotent.
 
 ## Phase 6 — Razorpay integration
 

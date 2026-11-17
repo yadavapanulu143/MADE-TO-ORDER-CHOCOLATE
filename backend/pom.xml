@@ -33,7 +33,7 @@
       reactor, so every build fails before it starts, including the ones that would otherwise pass.
       Uncomment each entry as the service is implemented, in the order the plan defines.
     -->
-    <!-- <module>services/order-service</module> -->
+    <module>services/order-service</module>
     <!-- <module>services/payment-service</module> -->
     <!-- <module>services/fulfilment-service</module> -->
     <!-- <module>services/notification-service</module> -->
@@ -220,6 +220,28 @@
       <dependency>
         <groupId>com.choco</groupId>
         <artifactId>catalog-adapters-in</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Order service layers -->
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>order-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>order-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>order-adapters-out</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>order-adapters-in</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

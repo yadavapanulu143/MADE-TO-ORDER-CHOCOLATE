@@ -17,6 +17,12 @@ integration and future session. They are not optional and are not renegotiated p
    permissions, network or a remote conflict blocks the push, report the exact issue, keep the local
    commit and continue only when it is safe. Never claim a push succeeded unless it did. Do not wait
    for approval after each successful commit.
+   - **`main` is the only branch.** Develop directly on local `main`. Do not create feature,
+     temporary or release branches, and do not open pull requests. After every successful commit,
+     push that exact commit to `origin/main`, then confirm the remote hash equals the local hash.
+     Every verified milestone is committed and pushed on its own; do not batch several milestones
+     into one push. Fetch and inspect remote changes before integrating them; never overwrite remote
+     work blindly.
 2. **Follow the development sequence strictly.** Identity Service (done, `d507fa2`) → API Gateway →
    Catalog/Product → Order Management → Razorpay Payment → Made-to-Order Production →
    Seller-Managed Delivery → Notification → Invoices/Reporting/Exports → Customer Storefront →
@@ -277,8 +283,8 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
 
 ## Test tally
 
-`mvn verify` at `backend/`: **446 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
-table as a rough map of where the tests are, not as a number to keep in sync by hand.
+`mvn clean verify` at `backend/`: **425 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
 |---|---|
@@ -295,8 +301,14 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | catalog-domain | 19 |
 | catalog-application | 27 |
 | catalog-app | 26 (4 unit + 22 integration: real PostgreSQL, Redis, RabbitMQ) |
-| api-gateway | 58 (35 unit + 23 integration: real Redis) |
-| **total** | **446** |
+| api-gateway | 37 (14 unit + 23 integration: real Redis) |
+| **total** | **425** |
+
+An earlier revision of this table claimed 446, counting the gateway's unit tests as 35. That number
+was wrong. `GatewayPropertiesTest` has always held 14 `@Test` methods — 13 when it was first added
+(`a69f8f2`) and 14 after the admin-route test landed — and no gateway test file was ever deleted in
+the repository's history. The corrected total is 425, and a full `mvn clean verify` reports exactly
+that with nothing skipped. Keep this number tied to a run, not to a hand edit.
 
 ### API Gateway tests (`*IT`, run by `mvn verify`)
 

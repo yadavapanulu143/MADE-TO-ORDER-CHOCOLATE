@@ -3,8 +3,9 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 446 tests, 0 failures, 0 errors. Integration tests
-(`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
+**Last verified:** `mvn clean verify` in `backend/` — **425 tests, 0 failures, 0 errors, 0 skipped**
+(Phase 5 initial cumulative regression, commit `4238d58`). Integration tests (`*IT`) run under the
+`verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
 schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
@@ -14,6 +15,12 @@ catalog service has integration tests on the same containers: schema/constraint 
 (`SchemaAndPersistenceIT`) and the full admin-and-storefront journey over real HTTP
 (`CatalogueJourneyIT`). The Redis rate limiter is additionally exercised against a real
 `redis:7.4-alpine` container.
+
+**Correction (Phase 5 session).** The previously recorded figure was 446, with the gateway counted as
+35 unit tests. That was a documentation error, not lost code: `GatewayPropertiesTest` has always held
+14 `@Test` methods (13 when first added in `a69f8f2`, 14 after the admin-route test), no gateway test
+file was ever deleted in the repository history, and no test is skipped. The verified cumulative total
+is **425**. This correction is recorded here and in `AGENTS.md` so the number is not re-inflated.
 
 ## GitHub push status — RESOLVED
 

@@ -18,6 +18,7 @@ public enum NotificationType {
     ORDER_PLACED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     ORDER_CONFIRMED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     ORDER_CANCELLED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
+    INVOICE_ISSUED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     PAYMENT_SUCCESS(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     PAYMENT_FAILED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     PAYMENT_PENDING(NotificationChannel.EMAIL, RecipientType.CUSTOMER),

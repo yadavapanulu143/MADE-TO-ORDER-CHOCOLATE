@@ -249,8 +249,9 @@ public abstract class AbstractOrderIntegrationTest {
         try (var connection = POSTGRES.createConnection("");
              var statement = connection.createStatement()) {
             statement.execute("""
-                    TRUNCATE TABLE order_lines, order_status_history, order_notes, orders,
-                        cart_lines, carts, idempotency_record, audit_log, outbox_event
+                    TRUNCATE TABLE invoice_lines, invoices, order_lines, order_status_history,
+                        order_notes, orders, cart_lines, carts, idempotency_record, audit_log,
+                        outbox_event
                     RESTART IDENTITY CASCADE
                     """);
         } catch (Exception e) {

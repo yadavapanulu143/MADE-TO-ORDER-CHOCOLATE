@@ -19,7 +19,7 @@ class NotificationTemplatesTest {
     private static final Map<String, String> ALL_VARIABLES = Map.of(
             "customerName", "Asha", "orderNumber", "CHOCO-1", "totalAmount", "500.00",
             "amount", "500.00", "reason", "changed mind", "ingredientName", "Cocoa",
-            "onHand", "1", "minimum", "2");
+            "onHand", "1", "minimum", "2", "invoiceNumber", "INV-1");
 
     static Stream<NotificationType> allTypes() {
         return Stream.of(NotificationType.values());

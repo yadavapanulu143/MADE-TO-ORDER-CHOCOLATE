@@ -67,6 +67,18 @@ public final class NotificationTemplates {
                 If you did not expect this, please contact us.
                 """);
 
+        put(NotificationType.INVOICE_ISSUED,
+                "Your invoice {{invoiceNumber}} for order {{orderNumber}}",
+                """
+                Hi {{customerName}},
+
+                Your invoice {{invoiceNumber}} for order {{orderNumber}} is ready.
+
+                Total billed: {{amount}}
+
+                You can download the invoice from your account at any time.
+                """);
+
         // --- Payment ---------------------------------------------------------------------------
         put(NotificationType.PAYMENT_SUCCESS,
                 "Payment received for order {{orderNumber}}",

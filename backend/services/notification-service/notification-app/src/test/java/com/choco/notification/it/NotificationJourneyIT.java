@@ -206,6 +206,33 @@ class NotificationJourneyIT extends AbstractNotificationIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("an invoice-issued event emails the customer the invoice number and the amount")
+    void invoiceIssuedReachesTheCustomer() throws Exception {
+        registerCustomer();
+
+        publish(EventTypes.INVOICE_ISSUED, "order-11", Map.of(
+                "orderId", "order-11",
+                "orderNumber", "CHOCO-2026001-11",
+                "invoiceId", "invoice-11",
+                "invoiceNumber", "INV-2026311-1000",
+                "customerId", CUSTOMER_ID.toString(),
+                "totalMinorUnits", 54_900,
+                "currency", "INR"));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var messages = GREEN_MAIL.getReceivedMessages();
+            assertThat(messages).isNotEmpty();
+            var message = messages[messages.length - 1];
+            assertThat(message.getAllRecipients()[0].toString()).isEqualTo("asha@example.com");
+            assertThat(message.getSubject()).contains("INV-2026311-1000");
+            assertThat(messageText(message))
+                    .as("the customer must see the invoice number and the billed total")
+                    .contains("INV-2026311-1000")
+                    .contains("549.00");
+        });
+    }
+
     // --- helpers -------------------------------------------------------------------------------
 
     /** Flattens a multipart message to its text, so the assertion is on the content, not the envelope. */

@@ -1,6 +1,7 @@
 package com.choco.order.adapter.in.messaging;
 
 import com.choco.events.envelope.EventTypes;
+import com.choco.order.application.service.InvoiceService;
 import com.choco.order.application.service.OrderCommandService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,10 +40,13 @@ class PaymentEventsListener {
     private static final Logger log = LoggerFactory.getLogger(PaymentEventsListener.class);
 
     private final OrderCommandService orderCommandService;
+    private final InvoiceService invoiceService;
     private final ObjectMapper objectMapper;
 
-    PaymentEventsListener(OrderCommandService orderCommandService, ObjectMapper objectMapper) {
+    PaymentEventsListener(OrderCommandService orderCommandService, InvoiceService invoiceService,
+                          ObjectMapper objectMapper) {
         this.orderCommandService = orderCommandService;
+        this.invoiceService = invoiceService;
         this.objectMapper = objectMapper;
     }
 
@@ -71,6 +75,10 @@ class PaymentEventsListener {
         // money; whether it took the *right* money is the order's own invariant to check.
         orderCommandService.markPaid(orderId, payload.providerPaymentId(), payload.providerOrderId(),
                 payload.amountMinorUnits(), payload.currency());
+        // Issue the invoice in the same consumption, after the order is confirmed. Issuance is
+        // idempotent by order id, so a redelivered capture issues nothing new and a broker retry
+        // cannot bill the customer twice.
+        invoiceService.issueForOrder(orderId);
         log.debug("Applied payment.captured to order {}", orderId);
     }
 

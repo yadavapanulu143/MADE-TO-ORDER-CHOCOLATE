@@ -91,6 +91,12 @@ class NotificationMessagingConfiguration {
     }
 
     @Bean
+    Binding invoiceIssuedBinding(Queue notificationEventsQueue, TopicExchange chocoEventsExchange) {
+        return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
+                .with(EventTypes.INVOICE_ISSUED);
+    }
+
+    @Bean
     Binding paymentCapturedBinding(Queue notificationEventsQueue, TopicExchange chocoEventsExchange) {
         return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
                 .with(EventTypes.PAYMENT_CAPTURED);

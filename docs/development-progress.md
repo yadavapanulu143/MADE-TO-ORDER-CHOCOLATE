@@ -3,10 +3,10 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **925 tests, 0 failures, 0 errors, 0 skipped**
-(all 39 modules SUCCESS; Phase 5: order-service payment-saga consumer and the order-total invariant).
-Integration tests (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests
-(`*Test`) run under `test`.
+**Last verified:** `mvn clean verify` in `backend/` — **1088 tests, 0 failures, 0 errors, 0 skipped**
+(all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
+invoice surfaces, and the `order.invoice-issued` notification). Integration tests (`*IT`) run under the
+`verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
 schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
@@ -400,7 +400,7 @@ configured for the variant. A variant with no recipe consumes nothing.
 | 9.8 | Order management | TODO |
 | 9.9 | Payment management | TODO |
 | 9.10 | Delivery management | TODO |
-| 9.11 | Invoice generation/download | TODO |
+| 9.11 | Invoice generation/download | DONE — the order service issues an invoice from a verified `payment.captured` (idempotent by order id, one invoice per order enforced by a unique index) and serves it at `/api/v1/invoices/me` (owner-scoped) and `/api/v1/admin/invoices` (seller). The document is a frozen snapshot of the order; `order.invoice-issued` is published for the notification service. See the invoice section below. |
 | 9.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | TODO |
 | 9.13 | Website settings | TODO |
 
@@ -433,16 +433,53 @@ gateway.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 5 | Flyway applied V1; Hibernate `validate` matches; a negative attempt count, a blank dedupe key and an out-of-range status are rejected, and a duplicate dedupe key is refused by the unique index |
-| NotificationJourneyIT | 7 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, and a failed delivery carries the reason the event gave |
+| NotificationJourneyIT | 8 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the event gave, and an `order.invoice-issued` emails the customer the invoice number and the billed total |
 | AdminNotificationApiIT | 7 | The admin log over real HTTP: list, counters and read are permission gated; a customer is refused; an unknown id is a 404; a delivered notification cannot be resent (409); a customer cannot trigger a resend (403) |
 | CleanArchitectureTest | 4 | The domain and application layers depend on no framework, adapter or provider SDK; the mail/SMS sender never leaks into the domain |
+
+## Invoice issuance and access (Phase 11)
+
+The invoice lives in the order service because an invoice is a statement about an order: it is the
+seller's record of what was billed, and the order already holds the frozen customer, address and priced
+lines it needs. Keeping it there avoids a second service reading the order's tables, which would break
+the one-database-per-service rule.
+
+- **Issued from a verified payment, never on request.** `PaymentEventsListener` calls
+  `InvoiceService.issueForOrder(orderId)` in the same consumption that confirms the order. There is no
+  customer endpoint that issues an invoice; a customer can only read their own.
+- **Idempotent by order id.** Issuance first looks for an existing invoice for the order and returns it
+  unchanged, so a redelivered `payment.captured` — a broker retry or a consumer restart — bills nothing
+  a second time. The database backs this with a unique index on `order_id`, so a race cannot produce two
+  documents either.
+- **Only a paid order is invoiced.** An unpaid order has nothing to bill, so asking for its invoice is a
+  refusal (`409`) on the admin path and a `404` on the customer path.
+- **The document is a frozen snapshot.** Customer name, contact, billing address and every priced line
+  are copied out of the order at issuance and never re-read, so a renamed, repriced or withdrawn product
+  cannot change a past invoice. `Invoice` is a record with no update methods — a correction is a credit
+  note, not a rewrite.
+- **The invoice number comes from a database sequence** (`INV-<yyyyDDD>-<n>`), never a count, so two
+  concurrent issuances cannot be handed the same number and a deletion cannot free a number for reuse.
+- **Ownership is part of the query.** `findByIdAndCustomerId` has no unscoped twin; a cross-customer read
+  by id or by order is reported as `404`, so the response does not confirm another customer's invoice
+  exists.
+- **The seller surface is separately gated.** `/api/v1/admin/invoices` needs an administrator role;
+  issuing by hand additionally needs `order:write`. The acting administrator's id is read from the token
+  for the audit trail, never from the request.
+- **The fact is published, not assumed.** Issuance raises `order.invoice-issued` (through the
+  transactional outbox, in the same transaction as the row), which the notification service consumes to
+  email the customer their invoice number and total.
+
+Endpoints: `GET /api/v1/invoices/me`, `GET /api/v1/invoices/me/{id}`, `GET /api/v1/invoices/me/by-order/{orderId}`
+(customer, owner-scoped); `GET /api/v1/admin/invoices`, `GET /api/v1/admin/invoices/{id}`,
+`POST /api/v1/admin/invoices/order/{orderId}` (seller). The gateway routes both prefixes to the order
+service; the administrative prefix is never public.
 
 ## Phase 11 — Testing and quality
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (818 green across every module) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (215 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification and the gateway) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (845 green across every module) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (243 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification and the gateway) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
@@ -503,23 +540,23 @@ gateway.
 | catalog-domain | 19 | – | 19 |
 | catalog-application | 27 | – | 27 |
 | catalog-app | 4 | 26 | 30 |
-| order-domain | 108 | – | 108 |
-| order-application | 64 | – | 64 |
-| order-adapters-in | 8 | – | 8 |
+| order-domain | 117 | – | 117 |
+| order-application | 76 | – | 76 |
+| order-adapters-in | 9 | – | 9 |
 | order-adapters-out | 14 | – | 14 |
-| order-app | 4 | 56 | 60 |
+| order-app | 4 | 74 | 78 |
 | payment-domain | 40 | – | 40 |
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 15 | 34 | 49 |
+| gateway | 15 | 36 | 51 |
 | fulfilment-domain | 88 | – | 88 |
 | fulfilment-application | 37 | – | 37 |
 | fulfilment-app | 4 | 24 | 28 |
 | notification-domain | 13 | – | 13 |
-| notification-application | 33 | – | 33 |
-| notification-app | 4 | 19 | 23 |
-| **Total** | **822** | **222** | **1044** |
+| notification-application | 34 | – | 34 |
+| notification-app | 4 | 20 | 24 |
+| **Total** | **845** | **243** | **1088** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -530,7 +567,7 @@ files undercounts and a naive per-file sum is not the total.
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 19 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment and notification surfaces reach their services with a token and are refused without one |
+| RoutingIT | 24 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment, order, invoice and notification surfaces reach their services with a token and are refused without one |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
@@ -561,6 +598,12 @@ files undercounts and a naive per-file sum is not the total.
 | PaymentEventsListenerTest | 8 | The listener's dispatch on its own, with no broker: each of the four routing keys calls the right command method, a capture passes the provider ids and the amount through, a malformed body is rejected, a missing or non-UUID order id is refused, and an unknown routing key is ignored — the boundary between "this is our event" and "this is not" is pinned without a container |
 | OrderPaymentIT | 11 | Starting a payment over real HTTP and a real PostgreSQL: the order's own frozen total is what is sent, never a caller-supplied figure; the response carries the provider order id and publishable key and nothing that reads as "paid"; an unauthenticated or not-fully-verified customer is refused (401/403); one customer cannot pay for another's order (403); an unknown order is a 404; a paid order cannot be charged again (`PAYMENT_ALREADY_CAPTURED`); starting a payment leaves the order `PAYMENT_PENDING`; a payment-service 5xx or a response with no provider order id becomes a 503 and the order stays payable; and two simultaneous starts both succeed without corrupting the order — the payment service owns deduplication |
 | CleanArchitectureTest | 4 | The order domain depends on no framework and no adapter; the application layer depends on no adapter, persistence framework or web framework; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
+
+### Invoice integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| InvoiceJourneyIT | 10 | Invoice issuance and access over a real broker, a real database and real HTTP: a verified `payment.captured` issues exactly one invoice and emits `order.invoice-issued` for the notification service; a redelivered capture issues none (the unique index on `order_id` holds); a customer reads their own invoice but a cross-customer read by invoice id or by order id is a `404`, never the document; an unauthenticated read is `401`; the customer's list is scoped to their own; the seller sees every invoice and can read one; a customer is refused the administrative surface (`403`); the seller can issue an invoice by hand for a confirmed order and the second call returns the same document; an unpaid order has no invoice and asking for one is a `404` |
 
 ### Payment integration tests (`mvn verify`)
 

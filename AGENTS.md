@@ -31,9 +31,10 @@ integration and future session. They are not optional and are not renegotiated p
    asking.
    - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
      Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
-     the `fulfilment-service`) → Notification (done, the `notification-service`)**. The next module
-     is **Invoices, Reporting and Customer Exports** (Phase 11), then the Storefront (Phase 12) and
-     Admin Dashboard (Phase 13).
+     the `fulfilment-service`) → Notification (done, the `notification-service`) → Invoice issuance
+     and access (done, in the `order-service`) → Reporting/Exports (in progress, the
+     `reporting-service`)**. The next module is the remainder of **Invoices, Reporting and Customer
+     Exports** (Phase 11), then the Storefront (Phase 12) and Admin Dashboard (Phase 13).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -412,6 +413,17 @@ The order service follows the same five-module shape as identity and catalog. Th
 - **A mapper that rebuilds an entity must carry the current `@Version` onto it.** Building a fresh
   entity at version 0 makes the next update match no row, so optimistic locking silently stops
   working and a concurrent edit is lost instead of refused.
+- **An invoice is a record, not a workflow.** `Invoice` (in the order service, since it is a statement
+  about an order) has no update methods at all — a correction is a credit note, never a rewrite. It is
+  issued exactly once per order from a verified `payment.captured`, idempotent by order id, with the
+  database's `invoices_order_unique` index as the last line so a race cannot produce two documents.
+  Everything it shows — customer, billing address, priced lines — is a frozen snapshot of the order and
+  is never re-read. The invoice number comes from the `invoice_number_seq` sequence, never a count.
+- **Ownership is part of the invoice query.** `findByIdAndCustomerId` has no unscoped twin, and
+  `ownInvoiceForOrder` filters by customer, so a cross-customer read by id or by order is a `404`, not
+  the document. `/api/v1/admin/invoices/**` needs an administrator role; issuing by hand needs
+  `order:write`. The `order.invoice-issued` event carries the invoice number and the billed total so the
+  notification service can email the customer without calling back.
 
 ## Fulfilment service conventions
 
@@ -518,7 +530,7 @@ each module lands and as the deployment configuration is built.
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1044 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1088 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -536,23 +548,23 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | catalog-domain | 19 |
 | catalog-application | 27 |
 | catalog-app | 30 (4 unit + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
-| order-domain | 108 |
-| order-application | 64 |
+| order-domain | 117 |
+| order-application | 76 |
 | order-adapters-out | 14 (real HTTP server) |
-| order-adapters-in | 8 |
-| order-app | 60 (4 architecture + 56 integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
+| order-adapters-in | 9 |
+| order-app | 78 (4 architecture + 74 integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
 | payment-domain | 40 |
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 49 (15 unit + 34 integration: real Redis) |
+| gateway | 51 (15 unit + 36 integration: real Redis) |
 | fulfilment-domain | 88 |
 | fulfilment-application | 37 |
 | fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
-| notification-application | 33 |
-| notification-app | 23 (4 architecture + 19 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
-| **total** | **1044** |
+| notification-application | 34 |
+| notification-app | 24 (4 architecture + 20 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| **total** | **1088** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently

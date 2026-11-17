@@ -7,16 +7,20 @@ import com.choco.core.port.TransactionRunner;
 import com.choco.order.application.port.AuditLogPort;
 import com.choco.order.application.port.CatalogPort;
 import com.choco.order.application.port.CustomerPort;
+import com.choco.order.application.port.InvoiceNumberGenerator;
 import com.choco.order.application.port.OrderNumberGenerator;
 import com.choco.order.application.port.PaymentPort;
 import com.choco.order.application.port.ServiceabilityPort;
 import com.choco.order.application.service.CartService;
 import com.choco.order.application.service.CheckoutService;
+import com.choco.order.application.service.InvoiceQueryService;
+import com.choco.order.application.service.InvoiceService;
 import com.choco.order.application.service.OrderCommandService;
 import com.choco.order.application.service.OrderQueryService;
 import com.choco.order.application.service.PaymentInitiationService;
 import com.choco.order.domain.port.CartRepository;
 import com.choco.order.domain.port.IdempotencyRecordRepository;
+import com.choco.order.domain.port.InvoiceRepository;
 import com.choco.order.domain.port.OrderRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -70,5 +74,19 @@ class OrderApplicationConfiguration {
     PaymentInitiationService paymentInitiationService(OrderRepository orderRepository,
                                                       PaymentPort paymentPort, AuditLogPort auditLog) {
         return new PaymentInitiationService(orderRepository, paymentPort, auditLog);
+    }
+
+    @Bean
+    InvoiceService invoiceService(OrderRepository orderRepository, InvoiceRepository invoiceRepository,
+                                  InvoiceNumberGenerator invoiceNumberGenerator,
+                                  EventPublisher eventPublisher, AuditLogPort auditLog, Clock clock,
+                                  IdGenerator idGenerator, TransactionRunner transactionRunner) {
+        return new InvoiceService(orderRepository, invoiceRepository, invoiceNumberGenerator,
+                eventPublisher, auditLog, clock, idGenerator, transactionRunner);
+    }
+
+    @Bean
+    InvoiceQueryService invoiceQueryService(InvoiceRepository invoiceRepository) {
+        return new InvoiceQueryService(invoiceRepository);
     }
 }

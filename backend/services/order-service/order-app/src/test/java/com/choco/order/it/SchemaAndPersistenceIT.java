@@ -44,7 +44,91 @@ class SchemaAndPersistenceIT extends AbstractOrderIntegrationTest {
     void all_tables_exist() throws Exception {
         assertThat(tableNames()).contains(
                 "orders", "order_lines", "order_status_history", "order_notes",
-                "carts", "cart_lines", "idempotency_record", "outbox_event", "audit_log");
+                "carts", "cart_lines", "idempotency_record", "outbox_event", "audit_log",
+                "invoices", "invoice_lines");
+    }
+
+    @Test
+    @DisplayName("the invoice number sequence exists and issues distinct values")
+    void invoice_number_sequence_issues_distinct_values() throws Exception {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.createStatement()) {
+            long first = nextSequenceValue(statement, "invoice_number_seq");
+            long second = nextSequenceValue(statement, "invoice_number_seq");
+            assertThat(second).isGreaterThan(first);
+        }
+    }
+
+    @Test
+    @DisplayName("an invoice total must equal items plus delivery charge")
+    void invoice_total_must_equal_its_parts() throws Exception {
+        assertThatThrownBy(() -> insertInvoice("a1111111-1111-1111-1111-111111111111", "INV-1",
+                "b1111111-1111-1111-1111-111111111111", 10_000, 5_000, 99_999))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoices_total_is_sum");
+    }
+
+    @Test
+    @DisplayName("an invoice with a negative amount is rejected")
+    void invoice_negative_amount_rejected() throws Exception {
+        assertThatThrownBy(() -> insertInvoice("a2222222-1111-1111-1111-111111111111", "INV-2",
+                "b2222222-1111-1111-1111-111111111111", -1, 0, -1))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoices_totals_non_negative");
+    }
+
+    @Test
+    @DisplayName("the invoice number is unique")
+    void invoice_number_is_unique() throws Exception {
+        insertInvoice("a3333333-1111-1111-1111-111111111111", "INV-3",
+                "b3333333-1111-1111-1111-111111111111", 10_000, 5_000, 15_000);
+        assertThatThrownBy(() -> insertInvoice("a4444444-1111-1111-1111-111111111111", "INV-3",
+                "b4444444-1111-1111-1111-111111111111", 10_000, 5_000, 15_000))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoices_number_unique");
+    }
+
+    @Test
+    @DisplayName("one order cannot have two invoices")
+    void one_invoice_per_order() throws Exception {
+        String order = "b5555555-1111-1111-1111-111111111111";
+        insertInvoice("a5555555-1111-1111-1111-111111111111", "INV-5", order, 10_000, 5_000, 15_000);
+        assertThatThrownBy(() -> insertInvoice("a6666666-1111-1111-1111-111111111111", "INV-6",
+                order, 10_000, 5_000, 15_000))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoices_order_unique");
+    }
+
+    @Test
+    @DisplayName("a currency other than INR is rejected on an invoice")
+    void invoice_foreign_currency_rejected() throws Exception {
+        assertThatThrownBy(() -> insertInvoiceWithCurrency("a7777777-1111-1111-1111-111111111111",
+                "INV-7", "b7777777-1111-1111-1111-111111111111", "USD"))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoices_currency_inr");
+    }
+
+    @Test
+    @DisplayName("an invoice line cannot reference an invoice that does not exist")
+    void invoice_line_requires_an_invoice() throws Exception {
+        assertThatThrownBy(() -> insertInvoiceLine("c1111111-1111-1111-1111-111111111111",
+                "d1111111-1111-1111-1111-111111111111"))
+                .isInstanceOf(SQLException.class)
+                .hasMessageContaining("invoice_lines_invoice_fk");
+    }
+
+    @Test
+    @DisplayName("deleting an invoice cascades to its lines")
+    void deleting_an_invoice_cascades() throws Exception {
+        String invoiceId = "c2222222-1111-1111-1111-111111111111";
+        insertInvoice(invoiceId, "INV-8", "b8888888-1111-1111-1111-111111111111", 10_000, 5_000, 15_000);
+        insertInvoiceLine("d2222222-1111-1111-1111-111111111111", invoiceId);
+
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.createStatement()) {
+            statement.execute("DELETE FROM invoices WHERE id = '" + invoiceId + "'");
+            assertThat(countWhere(statement, "invoice_lines", "invoice_id", invoiceId)).isZero();
+        }
     }
 
     @Test
@@ -165,9 +249,60 @@ class SchemaAndPersistenceIT extends AbstractOrderIntegrationTest {
     }
 
     private long nextSequenceValue(java.sql.Statement statement) throws SQLException {
-        try (var rows = statement.executeQuery("SELECT nextval('order_number_seq')")) {
+        return nextSequenceValue(statement, "order_number_seq");
+    }
+
+    private long nextSequenceValue(java.sql.Statement statement, String sequence) throws SQLException {
+        try (var rows = statement.executeQuery("SELECT nextval('" + sequence + "')")) {
             rows.next();
             return rows.getLong(1);
+        }
+    }
+
+    private void insertInvoice(String id, String number, String orderId, long items, long delivery,
+                               long total) throws Exception {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO invoices (id, invoice_number, order_id, order_number, customer_id,
+                        customer_name, customer_email, customer_mobile, billing_recipient_name,
+                        billing_mobile, billing_line1, billing_city, billing_state, billing_pincode,
+                        items_total_minor_units, delivery_charge_minor_units, total_minor_units,
+                        issued_at)
+                    VALUES ('%s', '%s', '%s', 'CHOCO-INV', '12345678-1234-1234-1234-123456789012',
+                        'Asha Rao', 'asha@example.com', '9876543210', 'Asha Rao', '9876543210',
+                        '12 Cocoa Lane', 'Bengaluru', 'Karnataka', '560001', %d, %d, %d, now())
+                    """.formatted(id, number, orderId, items, delivery, total));
+        }
+    }
+
+    private void insertInvoiceWithCurrency(String id, String number, String orderId, String currency)
+            throws Exception {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO invoices (id, invoice_number, order_id, order_number, customer_id,
+                        customer_name, customer_email, customer_mobile, billing_recipient_name,
+                        billing_mobile, billing_line1, billing_city, billing_state, billing_pincode,
+                        items_total_minor_units, delivery_charge_minor_units, total_minor_units, currency,
+                        issued_at)
+                    VALUES ('%s', '%s', '%s', 'CHOCO-INV', '12345678-1234-1234-1234-123456789012',
+                        'Asha Rao', 'asha@example.com', '9876543210', 'Asha Rao', '9876543210',
+                        '12 Cocoa Lane', 'Bengaluru', 'Karnataka', '560001', 10000, 5000, 15000, '%s',
+                        now())
+                    """.formatted(id, number, orderId, currency));
+        }
+    }
+
+    private void insertInvoiceLine(String id, String invoiceId) throws Exception {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.createStatement()) {
+            statement.execute("""
+                    INSERT INTO invoice_lines (id, invoice_id, product_id, variant_id, product_name,
+                        variant_label, unit_price_minor_units, quantity, display_order)
+                    VALUES ('%s', '%s', '%s', '%s', 'Dark Chocolate', '200 g', 10000, 1, 0)
+                    """.formatted(id, invoiceId, "22222222-2222-2222-2222-222222222222",
+                    "33333333-3333-3333-3333-333333333333"));
         }
     }
 

@@ -65,6 +65,7 @@ class PlatformEventsListener {
             case EventTypes.ORDER_PLACED -> orderPlaced(payload);
             case EventTypes.ORDER_CONFIRMED -> orderConfirmed(payload);
             case EventTypes.ORDER_CANCELLED -> orderCancelled(payload);
+            case EventTypes.INVOICE_ISSUED -> invoiceIssued(payload);
             case EventTypes.PAYMENT_CAPTURED -> paymentCaptured(payload);
             case EventTypes.PAYMENT_FAILED -> paymentFailed(payload);
             case EventTypes.PAYMENT_PENDING -> paymentPending(payload);
@@ -114,6 +115,21 @@ class PlatformEventsListener {
                 Map.of(
                         "orderNumber", str(payload, "orderNumber"),
                         "reason", orDefault(str(payload, "reason"), "Not stated"))));
+    }
+
+    private void invoiceIssued(Map<String, Object> payload) {
+        // Keyed on the invoice id, so a redelivery of one issuance sends one message and a genuine
+        // re-issuance (never in practice, but the key is honest) would send its own.
+        String invoiceId = str(payload, "invoiceId");
+        String orderId = str(payload, "orderId");
+        dispatchService.notify(new NotifyCommand(NotificationType.INVOICE_ISSUED,
+                dedupe("order.invoice-issued", invoiceId),
+                orderId, str(payload, "customerId"),
+                Map.of(
+                        "orderNumber", orDefault(str(payload, "orderNumber"), orderId),
+                        "invoiceNumber", orDefault(str(payload, "invoiceNumber"), invoiceId),
+                        "amount", Amounts.format(lng(payload, "totalMinorUnits"),
+                                str(payload, "currency")))));
     }
 
     // --- Payment -------------------------------------------------------------------------------

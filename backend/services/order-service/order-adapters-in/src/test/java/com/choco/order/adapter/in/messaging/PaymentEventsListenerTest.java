@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.choco.events.envelope.EventTypes;
+import com.choco.order.application.service.InvoiceService;
 import com.choco.order.application.service.OrderCommandService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
@@ -31,20 +32,22 @@ import org.springframework.amqp.core.MessageProperties;
  * container's retry and dead-letter policy applies, because acknowledging either would silently discard
  * a payment fact.
  *
- * <p>Only the collaborator the listener does not own is mocked — the use case it calls — so the
+ * <p>Only the collaborators the listener does not own are mocked — the use cases it calls — so the
  * assertions are about the listener's own behaviour: what it passes through, and when it refuses to act.
  */
 @DisplayName("Payment events listener")
 class PaymentEventsListenerTest {
 
     private OrderCommandService orderCommandService;
+    private InvoiceService invoiceService;
     private PaymentEventsListener listener;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     @BeforeEach
     void setUp() {
         orderCommandService = mock(OrderCommandService.class);
-        listener = new PaymentEventsListener(orderCommandService, objectMapper);
+        invoiceService = mock(InvoiceService.class);
+        listener = new PaymentEventsListener(orderCommandService, invoiceService, objectMapper);
     }
 
     @Test
@@ -59,6 +62,20 @@ class PaymentEventsListenerTest {
                 "currency", "INR")));
 
         verify(orderCommandService).markPaid(eq(orderId), eq("pay_1"), eq("order_1"), eq(54_900L), eq("INR"));
+        // The invoice is issued in the same consumption, after the order is confirmed.
+        verify(invoiceService).issueForOrder(orderId);
+    }
+
+    @Test
+    @DisplayName("a failure does not issue an invoice")
+    void failure_does_not_issue_an_invoice() {
+        UUID orderId = UUID.randomUUID();
+        listener.onMessage(message(EventTypes.PAYMENT_FAILED, Map.of(
+                "orderId", orderId.toString(),
+                "reason", "card declined")));
+
+        verify(orderCommandService).markPaymentFailed(eq(orderId), eq("card declined"));
+        verify(invoiceService, never()).issueForOrder(any());
     }
 
     @Test

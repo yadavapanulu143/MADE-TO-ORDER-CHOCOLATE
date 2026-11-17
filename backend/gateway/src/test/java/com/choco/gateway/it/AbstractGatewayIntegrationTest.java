@@ -177,6 +177,10 @@ public abstract class AbstractGatewayIntegrationTest {
         return send("GET", path, null, token);
     }
 
+    protected HttpResponse<String> post(String path, String body, String token) {
+        return send("POST", path, body, token);
+    }
+
     protected JsonNode json(HttpResponse<String> response) {
         try {
             return objectMapper.readTree(response.body());
@@ -192,6 +196,11 @@ public abstract class AbstractGatewayIntegrationTest {
     /** A valid customer access token. */
     protected String customerToken() {
         return token("CUSTOMER", List.of(), true, true);
+    }
+
+    /** A valid administrator access token holding the catalogue permission. */
+    protected String adminToken() {
+        return token("ADMIN", List.of("product:write"), false, false);
     }
 
     protected String token(String role, List<String> permissions, boolean emailVerified,

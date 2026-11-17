@@ -31,9 +31,15 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
  * <p>Unexpected exceptions are logged with the correlation id and returned as a generic 500: the
  * message is deliberately not echoed back, because exception text can leak schema, SQL or internal
  * hostnames to an attacker.
+ *
+ * <p>Registered at the lowest precedence because it is the fallback. Its {@code Exception} handler
+ * matches everything, and a {@code @ControllerAdvice} is consulted in order, first match wins — so a
+ * higher-precedence advice with a more specific handler (the security module's 403 for a denied
+ * {@code @PreAuthorize}, for example) must be reached first. At the highest precedence this advice
+ * would swallow those cases and report a permission refusal as a server error.
  */
 @RestControllerAdvice
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.LOWEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);

@@ -40,9 +40,10 @@ public class GatewayProperties {
             "/api/v1/auth/password-reset/complete",
             "/api/v1/auth/customers/**",
             "/.well-known/jwks.json",
+            "/api/v1/products",
             "/api/v1/products/**",
-            "/api/v1/catalog/**",
-            "/api/v1/settings/public/**",
+            "/api/v1/catalog/images/**",
+            "/api/v1/settings",
             "/api/v1/serviceability/**"));
 
     private final RateLimit rateLimit = new RateLimit();

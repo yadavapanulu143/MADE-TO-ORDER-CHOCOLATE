@@ -240,9 +240,44 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     returned 500 instead of 404. Both are now mapped to the not-found handler. This is what makes the
     gateway's "unrouted path" behaviour a 404 rather than a 500.
 
+29. **A repository adapter that maps a lazy entity outside an open session throws
+    `LazyInitializationException`.** The catalog `ProductRepositoryAdapter` loaded a product and
+    mapped its variant/image/attribute collections to the domain after the transaction had closed, so
+    every read failed. Reads that touch lazy children must run inside a transaction — the adapter's
+    read methods are `@Transactional(readOnly = true)`, and the mapping happens within that boundary.
+
+30. **An aggregate that carries no version cannot use JPA `@Version` for optimistic locking unless the
+    mapper restores it.** The mapper built a fresh entity at version 0 on every save, so the second
+    edit of any product sent `where version = 0` against a row already at 1 and failed as a stale
+    object. The adapter now reads the current version (`findVersionById`) and copies it onto the mapped
+    entity before saving. Any other service that maps a domain aggregate to a versioned entity needs
+    the same treatment.
+
+31. **A nullable parameter compared with `is null` in JPQL can bind as `bytea` on PostgreSQL.** The
+    catalog search used `(:search is null or lower(p.name) like ...)`, and PostgreSQL inferred the
+    parameter's type from the `IS NULL` test as `bytea`, so `lower(bytea)` did not exist and every
+    search failed. Build the `LIKE` pattern in the adapter (a literal `%` when there is no term) and
+    drop the nullable parameter; escape `%` and `_` in the user's term with an explicit `escape`
+    character so a search for `50%` matches literally.
+
+32. **A `@PreAuthorize` denial is `AuthorizationDeniedException`, which a catch-all `Exception` handler
+    reports as 500.** The refusal is a 403, but only if a handler for it is reached first.
+    `@ControllerAdvice` resolution is ordered, first match wins, so the specific handler must outrank
+    the fallback: `AccessDeniedExceptionHandler` (in `common-security`) maps the denial to 403, and the
+    shared `GlobalExceptionHandler` — whose `Exception` handler matches everything — was lowered to
+    `LOWEST_PRECEDENCE`. Two advices at the same precedence leave the outcome to bean order, which is
+    how a permission refusal was reported as a server error.
+
+33. **A route must be added to the gateway and the public-path list kept in step with the service's own
+    endpoints.** `/api/v1/admin/catalog/**` existed in the catalog service but was never routed at the
+    edge, so every admin catalogue call 404'd through the gateway while working when the service was
+    called directly. The gateway's public paths also named `/api/v1/settings/public/**`, which no
+    endpoint serves; the real public read is `/api/v1/settings`. `GatewayPropertiesTest` now asserts the
+    admin prefix is never public and `RoutingIT` proves the admin route is proxied and gated.
+
 ## Test tally
 
-`mvn verify` at `backend/`: **350 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
+`mvn verify` at `backend/`: **446 tests, 0 failures, 0 errors**. Counts move as work lands; treat this
 table as a rough map of where the tests are, not as a number to keep in sync by hand.
 
 | Module | Tests |
@@ -257,8 +292,11 @@ table as a rough map of where the tests are, not as a number to keep in sync by 
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
 | identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
-| api-gateway | 34 (13 unit + 21 integration: real Redis) |
-| **total** | **350** |
+| catalog-domain | 19 |
+| catalog-application | 27 |
+| catalog-app | 26 (4 unit + 22 integration: real PostgreSQL, Redis, RabbitMQ) |
+| api-gateway | 58 (35 unit + 23 integration: real Redis) |
+| **total** | **446** |
 
 ### API Gateway tests (`*IT`, run by `mvn verify`)
 

@@ -131,6 +131,27 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     }
 
     @Test
+    @DisplayName("an authenticated administrator request reaches the catalog admin route")
+    void adminCatalogueReachesCatalogService() {
+        HttpResponse<String> response = post("/api/v1/admin/catalog/products", "{}", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/admin/catalog/products");
+    }
+
+    @Test
+    @DisplayName("the administrative catalogue is not public: no token is refused at the edge")
+    void adminCatalogueIsNotPublic() throws Exception {
+        int before = CATALOG.getRequestCount();
+
+        HttpResponse<String> response = post("/api/v1/admin/catalog/products", "{}", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        // The refusal happens at the edge, so the service never sees an unauthenticated write.
+        assertThat(CATALOG.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("an unknown path is not routed to any service")
     void unknownPathIsNotRouted() {
         HttpResponse<String> response = get("/api/v1/does-not-exist", customerToken());

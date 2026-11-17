@@ -26,13 +26,13 @@
     <module>shared/common-redis</module>
     <module>shared/common-test</module>
     <module>services/identity-service</module>
+    <module>services/catalog-service</module>
     <module>gateway</module>
     <!--
       Modules below are not implemented yet. A module listed here without a pom.xml breaks the whole
       reactor, so every build fails before it starts, including the ones that would otherwise pass.
       Uncomment each entry as the service is implemented, in the order the plan defines.
     -->
-    <!-- <module>services/catalog-service</module> -->
     <!-- <module>services/order-service</module> -->
     <!-- <module>services/payment-service</module> -->
     <!-- <module>services/fulfilment-service</module> -->
@@ -198,6 +198,28 @@
       <dependency>
         <groupId>com.choco</groupId>
         <artifactId>identity-adapters-in</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Catalog service layers -->
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>catalog-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>catalog-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>catalog-adapters-out</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>catalog-adapters-in</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

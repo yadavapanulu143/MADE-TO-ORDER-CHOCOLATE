@@ -76,16 +76,19 @@ mock. The listener was then restored.
 forever — pegging a consumer and hiding the fault. Both now use a bounded retry (3 attempts, 1s→2s
 backoff, 10s cap) and dead-letter on exhaustion.
 
-**Residual gap (not yet closed).** There is still no order-service path that *starts* a payment: the
-payment service's internal `POST /api/v1/payments/orders/{orderId}/initiate` exists and is
-idempotent, and the order service has an unused `PaymentInitiationView`, but no order-side caller or
-payment port reaches it. The storefront therefore cannot yet open Razorpay checkout through the
-order service. The amount invariant above is what makes that endpoint safe to wire up later, so it
-was fixed first; wiring the initiation path is the next piece of work.
+**The residual gap is now closed.** There is an order-service path that starts a payment:
+`POST /api/v1/orders/me/{orderId}/payment` reads the order's own frozen total and calls the payment
+service's idempotent `POST /api/v1/payments/orders/{orderId}/initiate` through a `PaymentPort`, and
+returns the provider order id and publishable key for the storefront to open Razorpay checkout. The
+amount is never taken from the request, so the same frozen total that `markPaid` checks on the way
+back is the figure the provider is asked to collect on the way out — the two ends of the wire agree
+on one number. `OrderPaymentIT` (11 cases) proves the path over real HTTP and a real PostgreSQL,
+including ownership, verification gating, the paid-order refusal, a downstream outage, and two
+simultaneous starts.
 
-**Push status.** This milestone is pushed to `origin/main` at commit `98a9f36`; the remote hash was
-verified equal to the local hash after the push. The push succeeded on the first attempt this
-session.
+**Push status.** The saga fixes are pushed to `origin/main` at commit `98a9f36`, and the payment
+initiation milestone at commit `f7f135c`; both remote hashes were verified equal to the local hash
+after the push, and both pushes succeeded on the first attempt.
 
 ---
 

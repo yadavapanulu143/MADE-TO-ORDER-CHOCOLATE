@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpMethod;
@@ -54,6 +55,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 @EnableMethodSecurity
 @EnableConfigurationProperties(SecurityProperties.class)
+@Import(com.choco.security.web.AccessDeniedExceptionHandler.class)
 public class SecurityAutoConfiguration {
 
     /** Endpoints every service exposes unauthenticated: liveness, docs and the OpenAPI contract. */

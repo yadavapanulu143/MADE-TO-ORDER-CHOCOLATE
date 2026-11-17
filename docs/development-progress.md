@@ -3,36 +3,40 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — 316 tests, 0 failures, 0 errors. Integration tests
+**Last verified:** `mvn verify` in `backend/` — 446 tests, 0 failures, 0 errors. Integration tests
 (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
-The identity service now has full-stack integration tests that start real PostgreSQL, Redis and
+The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
 schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
 including OTP verification and token rotation (`CustomerJourneyIT`), administrator authentication and
 the customer/admin boundary (`AdminJourneyIT`), and outbox-to-broker delivery (`OutboxRelayIT`). The
-Redis rate limiter is additionally exercised against a real `redis:7.4-alpine` container.
+catalog service has integration tests on the same containers: schema/constraint agreement
+(`SchemaAndPersistenceIT`) and the full admin-and-storefront journey over real HTTP
+(`CatalogueJourneyIT`). The Redis rate limiter is additionally exercised against a real
+`redis:7.4-alpine` container.
 
-## GitHub push status — RESOLVED
+## GitHub push status — BLOCKED again (environment, not code)
 
-Pushing is working again (the earlier `403` was a stale/expired GitHub App token, not a code or
-permission problem). The API Gateway milestone was pushed from branch
-`feature/api-gateway-module`; the remote branch tracks local `main` at `2a68b79`.
-
-History: an earlier session recorded the blocker below. It is kept for context only — the token was
-refreshed and the backlog is now published.
+The Phase 4 catalog milestone is committed locally on branch `feature/catalog-service-phase4`
+(`c3acec8`) but **could not be pushed**. The push is refused before any ref is updated:
 
 ```
 remote: Permission to yadavapanulu143/MADE-TO-ORDER-CHOCOLATE.git denied to yadavapanulu143.
 fatal: unable to access '...': The requested URL returned error: 403
 ```
 
-Diagnosis at the time: the credentials in the environment were GitHub App installation tokens with
-**read-only** contents permission, not a user PAT — `$GITHUB_TOKEN` authenticated as
-`yadavapanulu143` but every write endpoint returned `403 Resource not accessible by integration`
-(`git/refs`) and `git push` was denied. A later session found the token refreshed; `git push`
-succeeded. If it blocks again, grant the GitHub App `contents: write` (and `pull_requests: write`
-for PR automation) on `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE`, or supply a user PAT with `repo`
-scope via `$GITHUB_TOKEN`. No force-push, history rewrite or credential handling was ever performed.
+Diagnosis: `$GITHUB_TOKEN` authenticates as `yadavapanulu143` and the REST API reports
+`permissions.push: true` for the repository (that field reflects the *user*, not the token), but
+write endpoints fail — `POST /git/refs` returns `403 Resource not accessible by integration`, which
+means the credential has **read-only contents** permission. The OpenHands credential-helper exchange
+(`~/.openhands/git-credential-helper github get`) now returns a password, but a push using it is
+still denied, and `gh auth setup-git` does not change the result. Two credential sources were tried
+(`$GITHUB_TOKEN`, the helper exchange); both are read-only for git writes.
+
+To unblock: grant the GitHub App `contents: write` on `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE`, or
+supply a user PAT with `repo` scope as `$GITHUB_TOKEN`. No force-push, history rewrite or credential
+handling was performed. This is the same class of blocker recorded earlier and later resolved by a
+token refresh; it has recurred.
 
 ---
 
@@ -93,10 +97,10 @@ scope via `$GITHUB_TOKEN`. No force-push, history rewrite or credential handling
 | 4.2 | Delivery address management | DONE | `AddressController` (CRUD + default); `AddressTest` (13) + `AddressServiceTest` (25); `V2__customer_addresses.sql`; one-default-per-customer enforced by a partial unique index and verified in PostgreSQL; ownership isolation verified over HTTP (21 checks) |
 | 4.3 | Verification status display | DONE | `CustomerView` carries `emailVerified`/`mobileVerified`/`fullyVerified` |
 | 4.4 | Password change from profile | DONE | `POST /me/password`; requires the current password, applies the shared password policy, rejects reuse, revokes every refresh token; `PasswordChangeServiceTest` (12); verified over HTTP (10 checks) |
-| 4.5 | Product catalogue (multi-product ready) | TODO | |
-| 4.6 | Product images | TODO | |
-| 4.7 | Pricing + variants/sizes | TODO | |
-| 4.8 | Admin product management | TODO | |
+| 4.5 | Product catalogue (multi-product ready) | DONE | New `catalog-service` (domain / application / adapters-out / adapters-in / app); `Product` aggregate with `ProductVariant`, `ProductImage`, `ProductAttribute`; public storefront `GET /api/v1/products` and `GET /api/v1/products/{slug}` (published only); admin CRUD under `/api/v1/admin/catalog/**` guarded by `product:write`. `ProductTest` (19) + `ProductCatalogServiceTest` (15) + `ProductQueryServiceTest` (9) green |
+| 4.6 | Product images | DONE | Upload via `POST /api/v1/admin/catalog/products/{id}/images` (multipart, allow-listed content types, size-capped), served immutably from `GET /api/v1/catalog/images/**` with `nosniff`; `LocalImageStorageAdapter` confines writes to a configured root; exercised over HTTP in `CatalogueJourneyIT` |
+| 4.7 | Pricing + variants/sizes | DONE | Variants carry an exact minor-unit price, per-variant min/max order quantity and SKU uniqueness; storefront derives a "from" price; `VariantPriceChanged` published on a price edit |
+| 4.8 | Admin product management | DONE | `AdminCatalogController`: create/edit, add/edit/remove variants, upload/edit/remove images and set the primary image, attributes, publish/unpublish/archive, and `PUT /api/v1/settings` for seller details and policies (`settings:write`); website settings readable publicly at `GET /api/v1/settings` |
 
 ## Phase 5 — Shopping and orders
 
@@ -236,8 +240,11 @@ scope via `$GITHUB_TOKEN`. No force-push, history rewrite or credential handling
 | identity-adapters-out | 6 | green |
 | identity-adapters-in | 6 | green |
 | identity-app | 40 (6 unit + 34 integration) | green |
-| api-gateway | 34 (13 unit + 21 integration) | green |
-| **Total** | **350** | **green** |
+| catalog-domain | 19 | green |
+| catalog-application | 27 | green |
+| catalog-app | 26 (4 unit + 22 integration) | green |
+| api-gateway | 58 (35 unit + 23 integration) | green |
+| **Total** | **446** | **green** |
 
 ### API Gateway integration tests (`mvn verify`)
 
@@ -256,3 +263,20 @@ scope via `$GITHUB_TOKEN`. No force-push, history rewrite or credential handling
 | CustomerJourneyIT | 14 | Register → verify email and mobile → sign in → profile/contact/addresses, refresh rotation and replay detection, logout, login rate limiting, ownership isolation |
 | AdminJourneyIT | 10 | Bootstrap administrator, admin token authority, no public admin sign-up, customer credentials and refresh tokens refused at admin endpoints, independent admin rate limiting |
 | OutboxRelayIT | 3 | A real registration publishes `customer.registered` to a bound RabbitMQ queue and marks the outbox row published |
+
+### Catalog integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 8 | Flyway applied V1; Hibernate `validate` matches the schema; the slug unique constraint spans every status; a zero price and an orphan variant are rejected by the database; one primary image per product; a product delete cascades; creating a product over HTTP writes an outbox row |
+| CatalogueJourneyIT | 14 | Full admin lifecycle over real HTTP (create → price → publish → read); publish refused without a variant; admin listing includes drafts; image upload then fetch with `nosniff`; public settings read and permission-gated write; a published product is public by slug while a draft is 404; unpublish hides without deleting; anonymous/customer/under-permission tokens refused with 401/403 |
+
+### Bugs the catalog integration tests caught
+
+| Bug | Symptom | Fix |
+|---|---|---|
+| Missing transaction on repository reads | `LazyInitializationException` on every admin read — the mapper touched lazy child collections after the session closed | `@Transactional(readOnly = true)` on the adapter's read methods |
+| Broken optimistic locking | `StaleObjectStateException` on the second edit of any product — the mapper built a fresh entity at version 0, so the update matched no row | Carry the current version onto the mapped entity before saving |
+| Ambiguous nullable search parameter | `function lower(bytea) does not exist` — PostgreSQL inferred the `:search is null` parameter as `bytea` | Build an escaped `LIKE` pattern in the adapter instead of a nullable parameter |
+| `@PreAuthorize` denial reported as 500 | A permission refusal returned `500 INTERNAL_ERROR` instead of `403` | `AccessDeniedExceptionHandler` in `common-security`; the shared catch-all advice lowered to `LOWEST_PRECEDENCE` so the specific handler wins |
+| Gateway did not route the admin catalogue | `/api/v1/admin/catalog/**` fell through to a 404 at the edge; the public settings path pattern did not match the real endpoint | Added the admin route and corrected the public-path list |

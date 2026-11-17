@@ -56,7 +56,8 @@ public class RoutingConfiguration {
     @Bean
     RouterFunction<ServerResponse> catalogRoutes(GatewayProperties properties) {
         return serviceRoute(properties, "catalog",
-                "/api/v1/products/**", "/api/v1/catalog/**", "/api/v1/settings/**");
+                "/api/v1/products/**", "/api/v1/catalog/**", "/api/v1/settings/**",
+                "/api/v1/settings", "/api/v1/admin/catalog/**");
     }
 
     @Bean

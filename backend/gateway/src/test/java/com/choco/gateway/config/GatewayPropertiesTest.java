@@ -76,7 +76,18 @@ class GatewayPropertiesTest {
             GatewayProperties properties = new GatewayProperties();
 
             assertThat(properties.getPublicPaths())
-                    .contains("/api/v1/products/**", "/api/v1/serviceability/**");
+                    .contains("/api/v1/products/**", "/api/v1/catalog/images/**",
+                            "/api/v1/settings", "/api/v1/serviceability/**");
+        }
+
+        @Test
+        void doesNotOpenTheAdministrativeCatalogue() {
+            GatewayProperties properties = new GatewayProperties();
+
+            // A product image is a public read; the screen that uploads it is not. The admin prefix
+            // must never be public, or the storefront could be edited without a token.
+            assertThat(properties.getPublicPaths())
+                    .noneMatch(path -> path.startsWith("/api/v1/admin"));
         }
 
         @Test

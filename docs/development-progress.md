@@ -15,28 +15,22 @@ catalog service has integration tests on the same containers: schema/constraint 
 (`CatalogueJourneyIT`). The Redis rate limiter is additionally exercised against a real
 `redis:7.4-alpine` container.
 
-## GitHub push status — BLOCKED again (environment, not code)
+## GitHub push status — RESOLVED
 
-The Phase 4 catalog milestone is committed locally on branch `feature/catalog-service-phase4`
-(`c3acec8`) but **could not be pushed**. The push is refused before any ref is updated:
+The Phase 4 catalog milestone is pushed. Branch `feature/catalog-service-phase4` at `d5377bf`
+tracks `origin/feature/catalog-service-phase4`; the remote ref matches local `HEAD` exactly.
 
-```
-remote: Permission to yadavapanulu143/MADE-TO-ORDER-CHOCOLATE.git denied to yadavapanulu143.
-fatal: unable to access '...': The requested URL returned error: 403
-```
+A first attempt was refused (`403 Permission ... denied`), the same class of blocker recorded in
+earlier sessions: the credential in the environment had **read-only contents** permission for
+`yadavapanulu143/MADE-TO-ORDER-CHOCOLATE` (`POST /git/refs` returned `403 Resource not accessible by
+integration`), even though `$GITHUB_TOKEN` authenticated and the REST API reported
+`permissions.push: true` for the repository — that field reflects the *user*, not the token. The
+token was refreshed in the environment and the push then succeeded, so the earlier blocker is again
+resolved by a token refresh rather than by any code change.
 
-Diagnosis: `$GITHUB_TOKEN` authenticates as `yadavapanulu143` and the REST API reports
-`permissions.push: true` for the repository (that field reflects the *user*, not the token), but
-write endpoints fail — `POST /git/refs` returns `403 Resource not accessible by integration`, which
-means the credential has **read-only contents** permission. The OpenHands credential-helper exchange
-(`~/.openhands/git-credential-helper github get`) now returns a password, but a push using it is
-still denied, and `gh auth setup-git` does not change the result. Two credential sources were tried
-(`$GITHUB_TOKEN`, the helper exchange); both are read-only for git writes.
-
-To unblock: grant the GitHub App `contents: write` on `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE`, or
-supply a user PAT with `repo` scope as `$GITHUB_TOKEN`. No force-push, history rewrite or credential
-handling was performed. This is the same class of blocker recorded earlier and later resolved by a
-token refresh; it has recurred.
+If it blocks again: grant the GitHub App `contents: write` on `yadavapanulu143/MADE-TO-ORDER-CHOCOLATE`,
+or supply a user PAT with `repo` scope as `$GITHUB_TOKEN`. No force-push, history rewrite or
+credential handling was performed.
 
 ---
 

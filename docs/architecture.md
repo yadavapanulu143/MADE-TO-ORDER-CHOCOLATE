@@ -9,8 +9,8 @@ Eight backend deployables behind one gateway, plus two frontend apps.
 
 | Component | Port (local) | Role |
 |---|---|---|
-| storefront (React/Vite) | 5173 | customer website |
-| admin (React/Vite) | 5174 | seller dashboard |
+| storefront (React/Vite) | 5173 (dev) / 80 (nginx) | customer website — implemented in `frontend/storefront` |
+| admin (React/Vite) | 5174 | seller dashboard — Phase 13 |
 | api-gateway | 8080 | single entry point, JWT validation, rate limiting |
 | identity-service | 8081 | customers, admins, addresses, OTP, tokens, audit |
 | catalog-service | 8082 | products, variants, prices, website settings |
@@ -52,6 +52,14 @@ Dependency direction is inward only: `domain ← application ← adapters ← ap
 if they ever acquire Spring, JPA, Jackson, Flyway, PostgreSQL or the Razorpay SDK. This was verified
 by adding `spring-core` to `common-core` and confirming the build fails with an explicit
 Clean Architecture message.
+
+### Frontend clients
+
+The storefront (`frontend/storefront`) is a static SPA served by nginx, which also proxies `/api` and
+`/.well-known` to the gateway so the browser has one origin. It holds no business rule the server does
+not re-enforce, and it holds no secret: the Razorpay publishable key arrives with each payment
+initiation and is never built into the bundle. The admin dashboard (Phase 13) will follow the same
+shape behind the same gateway.
 
 ## 3. Service boundaries and data ownership
 

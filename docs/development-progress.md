@@ -393,24 +393,6 @@ an ingredient is a separate aggregate the seller opts into: a job's preparation 
 whether or not any ingredient exists, and consumption is only attempted when a recipe has been
 configured for the variant. A variant with no recipe consumes nothing.
 
-## Phase 9 — Admin dashboard
-
-| # | Requirement | Status |
-|---|---|---|
-| 9.1 | Dashboard cards (sales, orders, pending, etc.) | TODO |
-| 9.2 | Customer management + search | TODO |
-| 9.3 | **Customer CSV export** | TODO |
-| 9.4 | **Customer XLSX export** | TODO |
-| 9.5 | Export authorization + audit trail | TODO |
-| 9.6 | Product management | TODO |
-| 9.7 | Production management | TODO |
-| 9.8 | Order management | TODO |
-| 9.9 | Payment management | TODO |
-| 9.10 | Delivery management | TODO |
-| 9.11 | Invoice generation/download | DONE — the order service issues an invoice from a verified `payment.captured` (idempotent by order id, one invoice per order enforced by a unique index) and serves it at `/api/v1/invoices/me` (owner-scoped) and `/api/v1/admin/invoices` (seller). The document is a frozen snapshot of the order; `order.invoice-issued` is published for the notification service. See the invoice section below. |
-| 9.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | TODO |
-| 9.13 | Website settings | TODO |
-
 ## Phase 10 — Notifications
 
 The `notification-service` (port 8086, database `choco_notification`) is implemented and verified.
@@ -553,7 +535,79 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 | 11.6 | Data privacy / export test | DONE — `AdminExportApiIT` proves the customer export masks the email and mobile (the raw values never appear in the file), the export needs `customer:export` beyond `report:read`, a customer token is refused, the download is `no-store` and the act is audited; `CsvXlsxExportWriterTest` proves a formula-injection cell is neutralised |
 | 11.7 | Security tests | IN PROGRESS — authz boundaries, ownership isolation and rate limiting are covered per service; a consolidated suite and `docs/security-review.md` are pending |
 
-## Phase 12 — Deployment preparation
+## Phase 12 — Customer storefront
+
+The customer website is a React + Vite + TypeScript single-page app under
+`frontend/storefront`. It talks only to the API gateway; it never reaches a service
+database or a service port directly. It is a presentation client — every rule it appears to
+enforce (verification before checkout, serviceable PIN, order cancellability) is enforced again on
+the server, and the browser never decides that a payment succeeded.
+
+| # | Requirement | Status | Evidence |
+|---|---|---|---|
+| 12.1 | Home page | DONE | `HomePage` — seller name and policies from `GET /api/v1/settings`, featured products from `GET /api/v1/products` |
+| 12.2 | Product listing | DONE | `ProductListPage` — paged public catalogue with a search box that forwards the term to the backend (which escapes it), not a client-side filter |
+| 12.3 | Product details + variants | DONE | `ProductDetailPage` — attributes, per-variant price/limits; a disabled variant cannot be chosen; the min/max order quantity is taken from the variant the server returned |
+| 12.4 | Registration and login | DONE | `RegisterPage`, `LoginPage`; the register form warns before submit on a malformed mobile number and renders the server's field errors when it is refused |
+| 12.5 | Email + mobile verification | DONE | `VerifyPage` — the channel is a query parameter the backend validates; resend uses the same channel |
+| 12.6 | Customer profile | DONE | `ProfilePage` — name, contact change (with the re-verification warning), password change; contact and password forms are separate so a password is never sent with a profile edit |
+| 12.7 | Address management | DONE | `AddressesPage` + `AddressForm` — create/edit/delete/default, PIN and mobile validated client-side as a courtesy and again on the server |
+| 12.8 | Cart | DONE | `CartPage` + `CartContext` — quantity updates respect the variant limits the server returns; checkout is blocked in the UI until both channels are verified, and the server refuses regardless |
+| 12.9 | Checkout | DONE | `CheckoutPage` — delivery charge quoted from `GET /api/v1/checkout/quote` before placing; an unserviceable PIN shows the seller's reason and hides the pay button; the order is placed with an `Idempotency-Key` so a double-tap cannot create two orders |
+| 12.10 | Razorpay payment | DONE | `OrderDetailPage` — the publishable key and the amount come from the server's payment initiation; the checkout handler's response is POSTed to the verify endpoint, which checks the signature and re-fetches the payment. A `null` public key (no provider configured) is surfaced as "not configured", never as success |
+| 12.11 | Order confirmation | DONE | `OrdersPage` / `OrderDetailPage` — the order number, frozen lines and totals as the server recorded them |
+| 12.12 | Order history | DONE | `OrdersPage` — owner-scoped `GET /api/v1/orders/me` |
+| 12.13 | Order tracking | DONE | `OrderDetailPage` — payment, preparation and delivery are shown from their own endpoints, each degrading gracefully when a stage does not exist yet |
+| 12.14 | Invoice downloads | DONE | `InvoicesPage` / `InvoiceDetailPage` — owner-scoped invoice reads; the invoice is a frozen snapshot |
+| 12.15 | Responsive layout | DONE | `styles.css` — a mobile-first grid; the header collapses to a single row, tables scroll, and forms are single-column below the breakpoint |
+
+### What the storefront tests pin down
+
+`npm test` runs Vitest with jsdom and Testing Library: **17 files, 105 tests, all green**, ~93% line
+coverage. The tests exercise real code paths with a stubbed `fetch` (the network is the one seam that
+is faked); nothing is mocked that the app itself owns.
+
+| Area | Tests | What it proves |
+|---|---|---|
+| `client.test.ts` | 9 | The bearer token is attached to a protected request and not to an anonymous one; a 401 triggers exactly one refresh shared across concurrent callers (so the rotated refresh token is not spent twice); a refused refresh drops the session and notifies listeners; an RFC 9457 problem body becomes an `ApiError` with its field errors; a 204 and a body-less 202 both resolve without a parse error; an `Idempotency-Key` reaches the request |
+| `tokenStore.test.ts` | 9 | A corrupt or partial stored session is treated as signed out rather than throwing; a nearly-expired token is reported as expiring |
+| `format.test.ts` | 11 | Paise render as Indian-grouped rupees; a negative sign stays outside the symbol; the server-formatted amount wins over a locally computed one; dates degrade to an em dash; the PIN and mobile validators |
+| `ProductListPage` / `ProductDetailPage` | 9 | The search term is sent to the backend; an empty result shows a state; a signed-out visitor is asked to sign in instead of being offered add-to-cart; an unverified customer is blocked; the chosen variant and quantity are what reach the cart; a disabled variant cannot be selected |
+| `CartPage` | 7 | A signed-out visitor is prompted; an unverified customer cannot reach checkout; a quantity change sends the new quantity; remove sends a DELETE |
+| `CheckoutPage` | 4 | The quote total and delivery charge render; an unserviceable PIN hides the pay button; placing an order carries an idempotency key and the chosen address id |
+| `OrderDetailPage` + `PaymentFlow` | 14 | Payment is prompted only while unpaid; checkout opens with the server's key and amount; the provider response is POSTed for server verification; an unconfigured provider is reported honestly; a dismissed window is reported; a refund request carries its reason; a failed initiation shows an error and never a "paid" state |
+| `AuthFlow` | 9 | Register sends the four fields and renders server validation; verify sends the channel and code; resend uses the channel; login stores the tokens; a lockout message is shown verbatim; password reset does not confirm whether an email exists and completes with the link token |
+| `ProfilePage` / `AddressesPage` | 10 | Verified badges; the re-verification warning after a contact change; a password change sends both passwords; addresses list, default and create |
+| `Layout` / `ProtectedRoute` / `App` | 15 | The header differs signed in and out; sign-out calls the endpoint and returns home; a protected path redirects a signed-out visitor to sign in; the router resolves each public route and the not-found page |
+| `HomePage` / `PoliciesPage` / `OrdersPage` / `InvoicesPage` / `ServiceabilityPage` / `razorpay` | 17 | Settings render; an empty state appears with no data; a serviceability quote explains an uncovered PIN; the checkout script is injected once and shared, and a load failure is a rejection, not a silent success |
+
+### Storefront deployment
+
+`frontend/storefront/Dockerfile` is a two-stage build (Node build, then nginx). `nginx.conf` serves
+the bundle, proxies `/api` and `/.well-known` to the `gateway` service so the browser sees one origin,
+adds an SPA fallback, and sets `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and a
+`Content-Security-Policy` that names the Razorpay checkout host. TLS terminates at the reverse proxy
+in front of it; the app does not claim to serve HTTPS itself.
+
+## Phase 13 — Admin dashboard
+
+| # | Requirement | Status |
+|---|---|---|
+| 13.1 | Dashboard cards (sales, orders, pending, etc.) | TODO |
+| 13.2 | Customer management + search | TODO |
+| 13.3 | **Customer CSV export** | TODO |
+| 13.4 | **Customer XLSX export** | TODO |
+| 13.5 | Export authorization + audit trail | TODO |
+| 13.6 | Product management | TODO |
+| 13.7 | Production management | TODO |
+| 13.8 | Order management | TODO |
+| 13.9 | Payment management | TODO |
+| 13.10 | Delivery management | TODO |
+| 13.11 | Invoice generation/download | DONE — the order service issues an invoice from a verified `payment.captured` (idempotent by order id, one invoice per order enforced by a unique index) and serves it at `/api/v1/invoices/me` (owner-scoped) and `/api/v1/admin/invoices` (seller). The document is a frozen snapshot of the order; `order.invoice-issued` is published for the notification service. See the invoice section below. |
+| 13.12 | Reports (sales, revenue, customer, order, production, delivery, failed payment, refund) | TODO |
+| 13.13 | Website settings | TODO |
+
+## Phase 14 — Deployment preparation
 
 | # | Requirement | Status |
 |---|---|---|

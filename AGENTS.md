@@ -33,8 +33,9 @@ integration and future session. They are not optional and are not renegotiated p
      Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
      the `fulfilment-service`) → Notification (done, the `notification-service`) → Invoice issuance
      and access (done, in the `order-service`) → Reporting and Customer Exports (done, the
-     `reporting-service`)**. The next module is the **Customer Storefront** (Phase 12), then the Admin
-     Dashboard (Phase 13).
+     `reporting-service`) → Customer Storefront (done, `frontend/storefront`)**. The next module is
+     the **Admin Dashboard** (Phase 13), then Docker Compose/Deployment/CI-CD (Phase 14) and the
+     end-to-end verification and handover (Phase 15).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -517,6 +518,37 @@ rebuilt from the event log. Things specific to it:
   `/api/v1/dashboard/**` are routed by the gateway and never in its public-path list; the service's own
   method security requires `report:read` on every endpoint, so the edge authenticates and the service
   authorises. `GatewayPropertiesTest` and `RoutingIT` both pin it.
+
+## Storefront conventions
+
+The customer website lives in `frontend/storefront` (React + Vite + TypeScript, Vitest + Testing
+Library). It is a presentation client only. Things specific to it:
+
+- **The browser never decides anything that matters.** It does not decide a payment succeeded, that a
+  PIN is serviceable, that an order is cancellable, or that a customer may check out. Each of those is
+  a server answer the app renders. The Razorpay handler's response is POSTed to the verify endpoint,
+  which checks the signature and re-fetches the payment; the storefront shows whatever the server
+  records, and a `null` public key is shown as "online payment is not configured", never as success.
+- **The wire layer is one file per concern.** `src/api/types.ts` mirrors the backend DTOs, `client.ts`
+  owns the token, the refresh and RFC 9457 problem mapping, and `endpoints.ts` groups calls by
+  resource. A page imports an endpoint function, not `fetch`.
+- **One refresh is shared across concurrent 401s.** The refresh token rotates, so two requests that
+  both see a 401 must not both spend it. `client.ts` keeps a single in-flight refresh promise; a test
+  proves two simultaneous 401s produce one refresh call. A refused refresh clears the session and
+  notifies listeners rather than looping.
+- **An empty 2xx body is a success, not an error.** Resend and password-reset request answer `202`
+  with no body; the client reads the text once and only parses when there is something to parse.
+- **Money is rendered from the server's own string when it is present.** `money(minorUnits, formatted)`
+  prefers the server-formatted value so a receipt cannot disagree with the invoice; the local formatter
+  is only a fallback.
+- **An idempotency key is generated per checkout attempt,** so a double-tap cannot create two orders.
+- **The dev proxy and the production proxy both point at the gateway.** Vite proxies `/api` to
+  `CHOCO_GATEWAY_URL` in development; nginx proxies `/api` to the `gateway` service in production, so
+  the browser sees one origin and no CORS preflight is needed.
+- **A test stubs `fetch`, nothing the app owns.** Settings are cached per tab, so the test setup resets
+  that cache between cases (`resetSettingsCache`) rather than letting one test's stub leak into the
+  next. A page that reads a path parameter is rendered through a real `<Route>` (`renderAtRoute`), not
+  just a history entry, or `useParams` is empty.
 
 ## ACID Compliance and Distributed Transaction Consistency
 

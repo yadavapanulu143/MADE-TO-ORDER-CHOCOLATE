@@ -157,6 +157,11 @@ public abstract class AbstractOrderIntegrationTest {
         return token(customerId, "customer@choco.test", Roles.CUSTOMER, true, true, Set.of());
     }
 
+    /** A customer who has verified their email but not their mobile, for the checkout gate. */
+    protected String partiallyVerifiedCustomerToken(UUID customerId) {
+        return token(customerId, "customer@choco.test", Roles.CUSTOMER, true, false, Set.of());
+    }
+
     protected String adminToken(UUID adminId) {
         return token(adminId, "owner@choco.test", Roles.ADMIN, false, false,
                 Set.of(Roles.PERM_ORDER_WRITE, Roles.PERM_PRODUCTION_WRITE, Roles.PERM_DELIVERY_WRITE));

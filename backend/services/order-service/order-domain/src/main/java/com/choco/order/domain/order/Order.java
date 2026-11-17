@@ -293,15 +293,21 @@ public class Order extends AggregateRoot {
     // Delivery track (seller-managed)
     // -------------------------------------------------------------------------------------------
 
-    /** Records who will deliver the order and hands it to delivery. */
+    /**
+     * Records who will deliver the order.
+     *
+     * <p>Assignment is not dispatch: the order stays {@code READY_FOR_DISPATCH} with a delivery
+     * person named, and a separate {@link #markOutForDelivery} records the hand-off. Collapsing the
+     * two would make the requirement's distinct "Assigned for Delivery" and "Out for Delivery" steps
+     * indistinguishable, and would leave no way to name the courier before the parcel leaves.
+     */
     public void assignDelivery(String deliveryPersonName, String deliveryPersonPhone, String actorId,
                                Instant now) {
         requireReadyForDispatch("Delivery can only be assigned once the order is ready for dispatch");
         this.deliveryPersonName = requireDeliveryPersonName(deliveryPersonName);
         this.deliveryPersonPhone = normalisePhone(deliveryPersonPhone);
         this.deliveryStatus = DeliveryStatus.ASSIGNED;
-        transitionTo(OrderStatus.OUT_FOR_DELIVERY, "Delivery assigned", actorId, now);
-        this.deliveryStatus = DeliveryStatus.OUT_FOR_DELIVERY;
+        this.updatedAt = now;
     }
 
     /** Records that the order left the seller. */

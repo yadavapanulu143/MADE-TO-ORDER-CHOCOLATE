@@ -112,12 +112,12 @@ succeeded on the first attempt this session, so no token refresh was needed.
 
 | # | Requirement | Status |
 |---|---|---|
-| 5.1 | Shopping cart | IN PROGRESS |
-| 5.2 | Quantity management + configurable limits | IN PROGRESS |
-| 5.3 | Checkout validation (availability, quantity, verification, address, PIN) | IN PROGRESS |
-| 5.4 | Order creation with immutable price snapshot | IN PROGRESS |
-| 5.5 | Order history (own orders only) | IN PROGRESS |
-| 5.6 | Order status transitions + history | IN PROGRESS |
+| 5.1 | Shopping cart | DONE |
+| 5.2 | Quantity management + configurable limits | DONE |
+| 5.3 | Checkout validation (availability, quantity, verification, address, PIN) | DONE |
+| 5.4 | Order creation with immutable price snapshot | DONE |
+| 5.5 | Order history (own orders only) | DONE |
+| 5.6 | Order status transitions + history | DONE |
 
 **Order Management Service (Phase 5).** A new five-module Clean Architecture service under
 `backend/services/order-service/` (`order-domain`, `order-application`, `order-adapters-out`,
@@ -187,6 +187,47 @@ Milestone 5c — persistence, app bootstrap and downstream clients (done):
 - Tests: 11 client tests against a real HTTP server, 12 order schema/constraint integration tests
   against a real PostgreSQL, and 4 new catalogue-journey integration tests for the internal lookup.
   Full `mvn verify` — **604 tests, 0 failures, 0 errors, 0 skipped**.
+
+Milestone 5d — REST layer and the order journey (done):
+
+- **Controllers** (`order-adapters-in`): `CartController` (`/api/v1/carts/me`, add/update/remove/clear),
+  `CheckoutController` (`/api/v1/checkout/quote` and `POST /api/v1/checkout` with an
+  `Idempotency-Key`), `OrderController` (`/api/v1/orders/me`: history, one order, cancel, refund
+  request) and `AdminOrderController` (`/api/v1/admin/orders`: search, counters, preparation,
+  delivery assignment and progress, notes, cancellation, payment retry). The customer id always comes
+  from the token, never the URL, so there is no id to tamper with; the query service still asserts
+  ownership on a single-order read.
+- **Gateway routes**: added `/api/v1/checkout/**` and `/api/v1/admin/orders/**` to the order route.
+  Neither existed, so both the checkout and the whole seller order surface would have 404'd at the
+  edge even though the service served them.
+- **`OrderJourneyIT`** — 27 tests through the real filter chain, controllers, use cases and
+  PostgreSQL, with the shared in-process downstream stub answering the catalogue, identity and
+  delivery calls. Covers the cart, checkout (quote, placement, price snapshot, cart clearing,
+  idempotent replay, key-reuse conflict, the fully-verified gate, the empty-cart refusal), customer
+  order ownership, cancellation and refund requests, and the full seller lifecycle from payment
+  confirmation through preparation, packaging, dispatch and delivery.
+
+Four defects the journey tests caught, none of which a unit test could see:
+
+1. **Order and cart lines were persisted with a null parent.** The mapper derived each line's primary
+   key from the parent id but never set the owning-side `order`/`cart` reference, so the not-null FK
+   was violated on the first insert. The order aggregate had never been round-tripped through the
+   database before — the persistence tests inserted orders with raw SQL. Fixed by setting the parent
+   on the line before it is added to the collection.
+2. **A customer token could read the entire seller order listing.** The admin controller carried no
+   class-level role check, so any authenticated caller reached `/api/v1/admin/orders`. Added
+   `@PreAuthorize` requiring `ADMIN` or `SUPER_ADMIN` at the class level, with the per-action
+   permissions still narrowing each method.
+3. **Delivery assignment dispatched the order.** `assignDelivery` moved the order straight to
+   `OUT_FOR_DELIVERY`, collapsing the requirement's distinct "Assigned for Delivery" and "Out for
+   Delivery" steps and making the separate dispatch step unreachable. Assignment now records the
+   person and sets the delivery track to `ASSIGNED` while the order stays `READY_FOR_DISPATCH`;
+   `markOutForDelivery` performs the hand-off.
+4. **A refund could be requested for an order that was never paid.** The test expected success where
+   the domain correctly refused; the expectation was wrong, and the case is now pinned as a refusal
+   alongside a paid-order success.
+
+  Full `mvn verify` — **636 tests, 0 failures, 0 errors, 0 skipped**.
 
 ## Phase 6 — Razorpay integration
 

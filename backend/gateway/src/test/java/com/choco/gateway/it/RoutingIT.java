@@ -152,6 +152,35 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     }
 
     @Test
+    @DisplayName("a checkout request reaches the order service")
+    void checkoutReachesOrderService() {
+        HttpResponse<String> response = post("/api/v1/checkout", "{}", customerToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/checkout");
+    }
+
+    @Test
+    @DisplayName("an administrative order request reaches the order service")
+    void adminOrdersReachOrderService() {
+        HttpResponse<String> response = get("/api/v1/admin/orders", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/admin/orders");
+    }
+
+    @Test
+    @DisplayName("the administrative order surface is not public: no token is refused at the edge")
+    void adminOrdersAreNotPublic() throws Exception {
+        int before = ORDER.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/admin/orders", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(ORDER.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
     @DisplayName("an unknown path is not routed to any service")
     void unknownPathIsNotRouted() {
         HttpResponse<String> response = get("/api/v1/does-not-exist", customerToken());

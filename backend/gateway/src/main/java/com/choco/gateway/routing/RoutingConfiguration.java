@@ -63,7 +63,8 @@ public class RoutingConfiguration {
     @Bean
     RouterFunction<ServerResponse> orderRoutes(GatewayProperties properties) {
         return serviceRoute(properties, "order",
-                "/api/v1/carts/**", "/api/v1/orders/**", "/api/v1/invoices/**",
+                "/api/v1/carts/**", "/api/v1/checkout/**", "/api/v1/orders/**",
+                "/api/v1/admin/orders/**", "/api/v1/invoices/**",
                 "/api/v1/cancellations/**", "/api/v1/refunds/**");
     }
 

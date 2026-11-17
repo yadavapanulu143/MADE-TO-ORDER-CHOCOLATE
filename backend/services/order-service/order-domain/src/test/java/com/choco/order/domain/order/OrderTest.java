@@ -287,14 +287,18 @@ class OrderTest {
         }
 
         @Test
-        @DisplayName("assigning delivery records the person and moves the order out for delivery")
+        @DisplayName("assigning delivery records the person without dispatching the order")
         void assignDelivery() {
             Order order = readyForDispatch();
             order.assignDelivery("Ravi", "9876500000", "admin", LATER);
 
+            assertThat(order.status()).isEqualTo(OrderStatus.READY_FOR_DISPATCH);
+            assertThat(order.deliveryStatus()).isEqualTo(DeliveryStatus.ASSIGNED);
+            assertThat(order.deliveryPersonName()).isEqualTo("Ravi");
+
+            order.markOutForDelivery("admin", LATER);
             assertThat(order.status()).isEqualTo(OrderStatus.OUT_FOR_DELIVERY);
             assertThat(order.deliveryStatus()).isEqualTo(DeliveryStatus.OUT_FOR_DELIVERY);
-            assertThat(order.deliveryPersonName()).isEqualTo("Ravi");
         }
 
         @Test

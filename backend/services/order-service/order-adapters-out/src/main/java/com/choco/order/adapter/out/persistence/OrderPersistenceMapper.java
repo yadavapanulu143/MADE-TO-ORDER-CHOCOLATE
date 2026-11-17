@@ -84,7 +84,7 @@ final class OrderPersistenceMapper {
         List<OrderLineJpaEntity> lines = new ArrayList<>();
         List<OrderLine> domainLines = order.lines();
         for (int i = 0; i < domainLines.size(); i++) {
-            lines.add(toEntity(order.id(), domainLines.get(i), i));
+            lines.add(toEntity(entity, domainLines.get(i), i));
         }
         entity.setLines(lines);
 
@@ -133,12 +133,13 @@ final class OrderPersistenceMapper {
         return order;
     }
 
-    private static OrderLineJpaEntity toEntity(UUID orderId, OrderLine line, int displayOrder) {
+    private static OrderLineJpaEntity toEntity(OrderJpaEntity order, OrderLine line, int displayOrder) {
         OrderLineJpaEntity entity = new OrderLineJpaEntity();
+        entity.setOrder(order);
         // A line has no identity of its own in the domain, but the row needs a primary key. Deriving
         // it from the order and the variant keeps it stable across saves, so an update is an update
         // rather than a delete-then-insert that would trip the (order, variant) unique constraint.
-        entity.setId(lineId(orderId, line.variantId()));
+        entity.setId(lineId(order.getId(), line.variantId()));
         entity.setProductId(line.productId());
         entity.setVariantId(line.variantId());
         entity.setProductName(line.productName());
@@ -213,7 +214,7 @@ final class OrderPersistenceMapper {
         List<CartLineJpaEntity> lines = new ArrayList<>();
         List<CartLine> domainLines = cart.lines();
         for (int i = 0; i < domainLines.size(); i++) {
-            lines.add(toEntity(cart.id(), domainLines.get(i), i));
+            lines.add(toEntity(entity, domainLines.get(i), i));
         }
         entity.setLines(lines);
         return entity;
@@ -226,9 +227,10 @@ final class OrderPersistenceMapper {
         return cart;
     }
 
-    private static CartLineJpaEntity toEntity(UUID cartId, CartLine line, int displayOrder) {
+    private static CartLineJpaEntity toEntity(CartJpaEntity cart, CartLine line, int displayOrder) {
         CartLineJpaEntity entity = new CartLineJpaEntity();
-        entity.setId(lineId(cartId, line.variantId()));
+        entity.setCart(cart);
+        entity.setId(lineId(cart.getId(), line.variantId()));
         entity.setProductId(line.productId());
         entity.setVariantId(line.variantId());
         entity.setProductName(line.productName());

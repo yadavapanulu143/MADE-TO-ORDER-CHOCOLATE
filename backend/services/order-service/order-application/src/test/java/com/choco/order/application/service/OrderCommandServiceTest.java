@@ -101,6 +101,9 @@ class OrderCommandServiceTest {
                 .isEqualTo("READY_FOR_DISPATCH");
 
         assertThat(service.assignDelivery(ADMIN, new AssignDeliveryCommand(order.id(), "Ravi", "9876500000")).status())
+                .isEqualTo("READY_FOR_DISPATCH");
+        assertThat(service.advanceDelivery(ADMIN,
+                delivery(order, DeliveryProgressCommand.DeliveryAction.OUT_FOR_DELIVERY)).status())
                 .isEqualTo("OUT_FOR_DELIVERY");
         assertThat(service.advanceDelivery(ADMIN, delivery(order, DeliveryProgressCommand.DeliveryAction.DELIVERED)).status())
                 .isEqualTo("DELIVERED");
@@ -136,6 +139,7 @@ class OrderCommandServiceTest {
     void failedRescheduledDelivered() {
         Order order = readyForDispatch();
         service.assignDelivery(ADMIN, new AssignDeliveryCommand(order.id(), "Ravi", null));
+        service.advanceDelivery(ADMIN, delivery(order, DeliveryProgressCommand.DeliveryAction.OUT_FOR_DELIVERY));
 
         assertThat(service.advanceDelivery(ADMIN,
                 new DeliveryProgressCommand(order.id(), DeliveryProgressCommand.DeliveryAction.ATTEMPT_FAILED,

@@ -309,10 +309,19 @@ The order service follows the same five-module shape as identity and catalog. Th
   succeeded; a `payment.captured` event from the payment service does. A browser redirect is never
   trusted.
 - **Money stays in paise.** `Money.inr(...)`, integer arithmetic, no `double` anywhere.
+- **The order number comes from a database sequence**, never from a count or a timestamp, so two
+  concurrent checkouts cannot be handed the same number.
+- **The order service reads the catalogue, never writes it.** `GET /api/v1/catalog/variants?ids=…`
+  is the one internal endpoint; it resolves published variants only, so a draft can never be priced
+  into an order. Adding a cross-service read means adding an internal endpoint on the owning service,
+  never a query against its database.
+- **A mapper that rebuilds an entity must carry the current `@Version` onto it.** Building a fresh
+  entity at version 0 makes the next update match no row, so optimistic locking silently stops
+  working and a concurrent edit is lost instead of refused.
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **425 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **604 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -329,9 +338,13 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | identity-app | 40 (6 unit + 34 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
 | catalog-domain | 19 |
 | catalog-application | 27 |
-| catalog-app | 26 (4 unit + 22 integration: real PostgreSQL, Redis, RabbitMQ) |
+| catalog-app | 30 (4 unit + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
+| order-domain | 98 |
+| order-application | 54 |
+| order-adapters-out | 11 (real HTTP server) |
+| order-app | 12 (integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
 | api-gateway | 37 (14 unit + 23 integration: real Redis) |
-| **total** | **425** |
+| **total** | **604** |
 
 An earlier revision of this table claimed 446, counting the gateway's unit tests as 35. That number
 was wrong. `GatewayPropertiesTest` has always held 14 `@Test` methods — 13 when it was first added

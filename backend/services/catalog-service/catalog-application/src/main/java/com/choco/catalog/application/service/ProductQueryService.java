@@ -2,6 +2,7 @@ package com.choco.catalog.application.service;
 
 import com.choco.catalog.application.dto.ProductSummaryView;
 import com.choco.catalog.application.dto.ProductView;
+import com.choco.catalog.application.dto.VariantLookupView;
 import com.choco.catalog.domain.product.Product;
 import com.choco.catalog.domain.product.ProductStatus;
 import com.choco.catalog.domain.product.Slug;
@@ -57,6 +58,45 @@ public class ProductQueryService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new NotFoundException(ErrorCode.NOT_FOUND, "Product not found"));
         return ProductViewMapper.toView(product);
+    }
+
+    /**
+     * Resolves variant ids to the facts another service needs to price and validate an order.
+     *
+     * <p>Only published products are searched, so a variant the seller has withdrawn — or whose
+     * product is no longer on sale — is simply absent from the result. The caller then treats a missing
+     * id as unavailable rather than pricing it from a stale snapshot. Each returned entry carries the
+     * owning product's availability so a single call answers "what is this and may it be bought".
+     *
+     * <p>An empty request returns an empty map rather than every variant: "nothing asked for" and
+     * "everything" must never be the same answer.
+     */
+    public java.util.Map<UUID, VariantLookupView> resolveVariants(java.util.Collection<UUID> variantIds) {
+        if (variantIds == null || variantIds.isEmpty()) {
+            return java.util.Map.of();
+        }
+        java.util.Map<UUID, VariantLookupView> resolved = new java.util.HashMap<>();
+        for (Product product : productRepository.findPublishedByVariantIds(variantIds)) {
+            boolean productAvailable = product.isOrderable();
+            for (var variant : product.variants()) {
+                if (!variantIds.contains(variant.id())) {
+                    continue;
+                }
+                resolved.put(variant.id(), new VariantLookupView(
+                        variant.id(),
+                        product.id(),
+                        product.name(),
+                        variant.label(),
+                        variant.sku(),
+                        variant.price().minorUnits(),
+                        variant.price().currency().getCurrencyCode(),
+                        variant.minOrderQuantity(),
+                        variant.maxOrderQuantity(),
+                        variant.isActive(),
+                        productAvailable));
+            }
+        }
+        return resolved;
     }
 
     /**

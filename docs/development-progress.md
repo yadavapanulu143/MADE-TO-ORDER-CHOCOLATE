@@ -3,9 +3,9 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **425 tests, 0 failures, 0 errors, 0 skipped**
-(Phase 5 initial cumulative regression, commit `4238d58`). Integration tests (`*IT`) run under the
-`verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
+**Last verified:** `mvn clean verify` in `backend/` — **604 tests, 0 failures, 0 errors, 0 skipped**
+(Phase 5c: order-service persistence, app bootstrap and downstream clients). Integration tests
+(`*IT`) run under the `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
 schema agreement and database constraints (`SchemaAndPersistenceIT`), the complete customer journey
@@ -144,6 +144,46 @@ Two bugs the domain tests caught and fixed before anything shipped:
    naming a *different* payment for an already-paid order was silently swallowed instead of refused.
    The conflict check now runs first; a duplicate confirmation of the same payment is still idempotent.
 
+Milestone 5b — application layer (done):
+
+- Use cases, framework-free and constructed by `OrderApplicationConfiguration`: `CartService`
+  (add/update/remove a line, refresh display prices from the catalogue), `CheckoutService` (quote and
+  place an order, snapshotting prices, delivery address and customer contact), `OrderCommandService`
+  (paid confirmation, preparation and delivery transitions, notes, cancellation, refund request) and
+  `OrderQueryService` (a customer's own orders, the admin listing).
+- Outbound ports the use cases depend on: `CatalogPort`, `CustomerPort`, `ServiceabilityPort`,
+  `OrderNumberGenerator`, `AuditLogPort`. The application layer holds no HTTP, JPA or broker import.
+- Idempotency is a first-class concern: checkout consults an `IdempotencyRecord` scoped by operation
+  and key, so a double-submitted checkout returns the first order rather than creating a second.
+- 54 application unit tests (cart 12, checkout 20, command 15, query 7), all passing.
+
+Milestone 5c — persistence, app bootstrap and downstream clients (done):
+
+- **Persistence adapters** (`order-adapters-out`): JPA entities for `orders`, `order_lines`,
+  `order_status_history`, `order_notes`, `carts`, `cart_lines`, `idempotency_record` and the shared
+  `outbox_event`/`audit_log`; an explicit `OrderPersistenceMapper` (no reflective mapping, so a column
+  rename cannot silently change the domain); and repository adapters that carry the current row
+  version onto the mapped entity so optimistic locking actually fires. Reads are
+  `@Transactional(readOnly = true)` because the mapper touches lazy child collections.
+- **Flyway migration** `V1__order_schema.sql`: every monetary column is a `BIGINT` count of paise; the
+  stored total is constrained to equal its parts; currency is constrained to `INR`; the order number
+  is unique; one cart per customer and one line per variant are unique constraints; the idempotency
+  key is unique per scope. The human-readable order number comes from a PostgreSQL sequence, so two
+  concurrent checkouts cannot be handed the same number.
+- **App bootstrap** (`order-app`): `OrderServiceApplication`, `CoreConfiguration` (the `Clock` and
+  `IdGenerator` ports), `application.yml`, and a `SequenceOrderNumberGenerator` that draws the order
+  number from the database sequence.
+- **Downstream clients** (`order-adapters-out`): `CatalogClient`, `CustomerClient` and
+  `ServiceabilityClient` built on a shared `RestClient` factory (`DownstreamClients`) that maps any
+  downstream failure to `DEPENDENCY_UNAVAILABLE` without leaking the downstream message, and forwards
+  the caller's own bearer token rather than holding a privileged credential.
+- **Catalog internal endpoint**: `GET /api/v1/catalog/variants?ids=…` (`InternalCatalogController`)
+  resolves a batch of variant ids to their current price and availability, published products only, so
+  the order service can price and validate a cart in one call without ever seeing a draft.
+- Tests: 11 client tests against a real HTTP server, 12 order schema/constraint integration tests
+  against a real PostgreSQL, and 4 new catalogue-journey integration tests for the internal lookup.
+  Full `mvn verify` — **604 tests, 0 failures, 0 errors, 0 skipped**.
+
 ## Phase 6 — Razorpay integration
 
 | # | Requirement | Status |
@@ -273,9 +313,13 @@ Two bugs the domain tests caught and fixed before anything shipped:
 | identity-app | 40 (6 unit + 34 integration) | green |
 | catalog-domain | 19 | green |
 | catalog-application | 27 | green |
-| catalog-app | 26 (4 unit + 22 integration) | green |
-| api-gateway | 58 (35 unit + 23 integration) | green |
-| **Total** | **446** | **green** |
+| catalog-app | 30 (4 unit + 26 integration) | green |
+| order-domain | 98 | green |
+| order-application | 54 | green |
+| order-adapters-out | 11 | green |
+| order-app | 12 (integration) | green |
+| api-gateway | 37 (14 unit + 23 integration) | green |
+| **Total** | **604** | **green** |
 
 ### API Gateway integration tests (`mvn verify`)
 
@@ -300,7 +344,14 @@ Two bugs the domain tests caught and fixed before anything shipped:
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 8 | Flyway applied V1; Hibernate `validate` matches the schema; the slug unique constraint spans every status; a zero price and an orphan variant are rejected by the database; one primary image per product; a product delete cascades; creating a product over HTTP writes an outbox row |
-| CatalogueJourneyIT | 14 | Full admin lifecycle over real HTTP (create → price → publish → read); publish refused without a variant; admin listing includes drafts; image upload then fetch with `nosniff`; public settings read and permission-gated write; a published product is public by slug while a draft is 404; unpublish hides without deleting; anonymous/customer/under-permission tokens refused with 401/403 |
+| CatalogueJourneyIT | 18 | Full admin lifecycle over real HTTP (create → price → publish → read); publish refused without a variant; admin listing includes drafts; image upload then fetch with `nosniff`; public settings read and permission-gated write; a published product is public by slug while a draft is 404; unpublish hides without deleting; anonymous/customer/under-permission tokens refused with 401/403; the internal variant lookup resolves a published variant with its price and availability, hides a draft product's variant, omits an unknown id rather than erroring, and refuses an anonymous caller |
+
+### Order integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 12 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; the order-number sequence issues distinct values; the stored total must equal items plus delivery charge; a negative amount and a foreign currency are rejected; the order number is unique; an orphan order line is rejected; a product delete cascades to lines, history and notes; one cart per customer; an idempotency key is unique per scope and reusable across scopes |
+| OutboundClientTest | 11 | The catalogue, identity and delivery clients against a real HTTP server: the exact request each sends (batch variant query, customer profile path, PIN-code path), a missing variant is absent rather than an error, an unknown customer or foreign address id is empty, and a downstream 5xx becomes `DEPENDENCY_UNAVAILABLE` rather than a business error or a silent "not serviceable" |
 
 ### Bugs the catalog integration tests caught
 

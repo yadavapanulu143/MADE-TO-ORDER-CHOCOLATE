@@ -42,6 +42,17 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-web</artifactId>
     </dependency>
+    <!-- Reads the JSON bodies returned by the catalogue and identity services. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <!-- Bean validation on the client DTOs, so a malformed upstream body fails with a clear message
+         rather than a null pointer deeper in the mapping. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.flywaydb</groupId>
       <artifactId>flyway-core</artifactId>
@@ -64,6 +75,14 @@
     <dependency>
       <groupId>com.choco</groupId>
       <artifactId>common-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- A real HTTP server on a loopback port for the outbound client tests. The clients are the one
+         place the order service speaks a wire contract, so the test exercises the real serialization
+         and the real request the client sends, not a mocked transport. -->
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

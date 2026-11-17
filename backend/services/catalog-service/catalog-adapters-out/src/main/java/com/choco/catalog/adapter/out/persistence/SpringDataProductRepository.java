@@ -1,6 +1,7 @@
 package com.choco.catalog.adapter.out.persistence;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -57,4 +58,20 @@ interface SpringDataProductRepository extends JpaRepository<ProductJpaEntity, UU
               and lower(p.name) like :pattern escape '!'
             """)
     Page<ProductJpaEntity> searchPublished(@Param("pattern") String pattern, Pageable pageable);
+
+    /**
+     * Resolves the products that own any of the given variants, published ones only.
+     *
+     * <p>Used by the order service at checkout to price and validate a cart. The status filter is part
+     * of the query rather than a check the caller must remember, so a draft product's variant can
+     * never be priced. A variant id that matches nothing simply yields no product, which the caller
+     * reads as "unknown or unavailable".
+     */
+    @Query("""
+            select distinct p from ProductJpaEntity p
+            join p.variants v
+            where v.id in :variantIds
+              and p.status = 'PUBLISHED'
+            """)
+    List<ProductJpaEntity> findPublishedByVariantIds(@Param("variantIds") Collection<UUID> variantIds);
 }

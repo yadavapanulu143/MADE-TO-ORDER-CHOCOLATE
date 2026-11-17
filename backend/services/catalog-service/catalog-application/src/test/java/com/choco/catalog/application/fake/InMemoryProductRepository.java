@@ -82,6 +82,14 @@ public class InMemoryProductRepository implements ProductRepository {
         return store.values().stream().filter(product -> product.status() == status).count();
     }
 
+    @Override
+    public List<Product> findPublishedByVariantIds(Collection<UUID> variantIds) {
+        return store.values().stream()
+                .filter(product -> product.status() == ProductStatus.PUBLISHED)
+                .filter(product -> product.variants().stream().anyMatch(variant -> variantIds.contains(variant.id())))
+                .toList();
+    }
+
     private static boolean matchesSearch(Product product, String search) {
         return search == null || product.name().toLowerCase().contains(search.toLowerCase());
     }

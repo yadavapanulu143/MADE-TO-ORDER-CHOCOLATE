@@ -40,5 +40,15 @@ public interface ProductRepository {
     /** A page of published products matching a search term, for the storefront. */
     PageResult<Product> findPublished(String search, PageQuery page);
 
+    /**
+     * The published products that own any of the given variants.
+     *
+     * <p>Lets a caller resolve a set of variant ids to their current price and availability in one
+     * call, without knowing the products' slugs. Only published products are returned, so a variant of
+     * a withdrawn product resolves to nothing and the caller treats it as unavailable rather than
+     * pricing it from stale data.
+     */
+    java.util.List<Product> findPublishedByVariantIds(java.util.Collection<UUID> variantIds);
+
     long countByStatus(ProductStatus status);
 }

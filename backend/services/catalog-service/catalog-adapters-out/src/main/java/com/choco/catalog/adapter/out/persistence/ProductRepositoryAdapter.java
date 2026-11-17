@@ -99,6 +99,17 @@ class ProductRepositoryAdapter implements ProductRepository {
         return toPageResult(result, page);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<Product> findPublishedByVariantIds(Collection<UUID> variantIds) {
+        if (variantIds == null || variantIds.isEmpty()) {
+            return List.of();
+        }
+        return delegate.findPublishedByVariantIds(variantIds).stream()
+                .map(CatalogPersistenceMapper::toDomain)
+                .toList();
+    }
+
     /**
      * Builds a case-insensitive contains-pattern for the search term.
      *

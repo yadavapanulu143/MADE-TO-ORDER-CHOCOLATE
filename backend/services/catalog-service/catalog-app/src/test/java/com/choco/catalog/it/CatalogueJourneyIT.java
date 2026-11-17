@@ -209,9 +209,71 @@ class CatalogueJourneyIT extends AbstractCatalogIntegrationTest {
         }
     }
 
+    @Nested
+    @DisplayName("internal variant lookup")
+    class InternalVariantLookup {
+
+        @Test
+        @DisplayName("a published variant is resolved with its price and availability")
+        void published_variant_is_resolved() {
+            String token = admin();
+            String productId = createPublishedProduct(token, "Dark Chocolate Bar", "450.00");
+            String variantId = variantIdOf(token, productId);
+
+            var response = get("/api/v1/catalog/variants?ids=" + variantId, token);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            JsonNode variant = json(response).get(variantId);
+            assertThat(variant.get("productId").asText()).isEqualTo(productId);
+            assertThat(variant.get("productName").asText()).isEqualTo("Dark Chocolate Bar");
+            assertThat(variant.get("priceMinorUnits").asLong()).isEqualTo(45_000L);
+            assertThat(variant.get("variantActive").asBoolean()).isTrue();
+            assertThat(variant.get("productAvailable").asBoolean()).isTrue();
+        }
+
+        @Test
+        @DisplayName("a draft product's variant is not resolved, so an unannounced product cannot be ordered")
+        void draft_variant_is_not_resolved() {
+            String token = admin();
+            String id = json(post("/api/v1/admin/catalog/products",
+                    jsonBody(Map.of("name", "Secret Bar")), token)).get("id").asText();
+            String variantId = json(post("/api/v1/admin/catalog/products/" + id + "/variants",
+                    jsonBody(Map.of("label", "200 g", "sku", "SKU-SECRET", "price", "450.00",
+                            "minOrderQuantity", 1, "maxOrderQuantity", 10)), token)).get("id").asText();
+
+            var response = get("/api/v1/catalog/variants?ids=" + variantId, token);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(json(response)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an unknown variant id is absent from the result rather than an error")
+        void unknown_variant_is_absent() {
+            var response = get("/api/v1/catalog/variants?ids=" + UUID.randomUUID(), admin());
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(json(response)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the internal lookup is not public")
+        void internal_lookup_requires_a_token() {
+            var response = get("/api/v1/catalog/variants?ids=" + UUID.randomUUID(), null);
+
+            assertThat(response.statusCode()).isEqualTo(401);
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Multipart helper
     // ---------------------------------------------------------------------------------------------
+
+    /** Reads back the id of a product's first variant, which the checkout addresses by id. */
+    private String variantIdOf(String token, String productId) {
+        return json(get("/api/v1/admin/catalog/products/" + productId, token))
+                .get("variants").get(0).get("id").asText();
+    }
 
     private java.net.http.HttpResponse<String> sendMultipart(String path, String token, String filename,
                                                              String contentType, byte[] content) {

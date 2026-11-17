@@ -3,8 +3,8 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn verify` in `backend/` — **907 tests, 0 failures, 0 errors, 0 skipped**
-(Phase 7/8: fulfilment-service — made-to-order production, ingredients and seller-managed delivery).
+**Last verified:** `mvn clean verify` in `backend/` — **925 tests, 0 failures, 0 errors, 0 skipped**
+(all 39 modules SUCCESS; Phase 5: order-service payment-saga consumer and the order-total invariant).
 Integration tests (`*IT`) run under the `verify` phase via the failsafe plugin; unit tests
 (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
@@ -54,6 +54,34 @@ seller-managed delivery) is pushed to `origin/main` at commit `6c86892`; the rem
 equal to the local hash after the push. The push succeeded on the first attempt this session, so no
 token refresh was needed. The previous milestone (Phase 6, payment-service: Razorpay orders,
 verification, webhooks, refunds and disputes) is at `707f193`.
+
+---
+
+## Distributed consistency review — the order↔payment saga
+
+An ACID and cross-service consistency review of every completed module found two defects on the
+order↔payment boundary. Both are now fixed and covered by tests that fail without the fix.
+
+| # | Defect | Why it mattered | Fix |
+|---|---|---|---|
+| 1 | The order service never consumed payment events. `payment.captured`, `payment.failed`, `payment.pending` and `payment.refund-processed` were published to a topic exchange no order-service queue was bound to. | The whole saga was dead: a customer could pay, the payment service would record `PAID`, and the order would stay `PAYMENT_PENDING` forever. Preparation never started and the fulfilment service never received `order.confirmed` — a paid order that is never made. `OrderCommandService.markPaid` was reachable only from a test. | `OrderMessagingConfiguration` declares a durable queue on `choco.events` bound to the four routing keys, with a retry queue and dead-letter queue; `PaymentEventsListener` dispatches each to `OrderCommandService`. `PaymentEventsIT` proves the behaviour over a real broker. |
+| 2 | The order accepted a payment for any amount. `InternalPaymentController.initiate` takes a caller-supplied `amountMinorUnits`, the payment service verifies a capture only against the amount it was *told* to collect, and `Order.markPaid` did not look at the amount at all. | A customer could initiate a payment for ₹1 against a ₹5,000 order, pay it, and have the order confirmed and the chocolate made and shipped. Direct money loss on every order. | `Order.markPaid` now compares the collected amount to the order's frozen `total()` and throws `PAYMENT_AMOUNT_MISMATCH` on any difference; the listener threads the amount from the event through `OrderCommandService`. `PaymentEventsIT.a_capture_for_the_wrong_amount_is_refused` and four `OrderTest` cases pin it. |
+
+Both fixes were verified by a negative control: with the `@RabbitListener` commented out, four of the
+five saga integration tests fail, which proves the tests exercise the real consumer rather than a
+mock. The listener was then restored.
+
+**A latent hot-loop was also fixed.** Neither `order-service` nor `fulfilment-service` set
+`default-requeue-rejected: false`, so a message that always threw was redelivered in a tight loop
+forever — pegging a consumer and hiding the fault. Both now use a bounded retry (3 attempts, 1s→2s
+backoff, 10s cap) and dead-letter on exhaustion.
+
+**Residual gap (not yet closed).** There is still no order-service path that *starts* a payment: the
+payment service's internal `POST /api/v1/payments/orders/{orderId}/initiate` exists and is
+idempotent, and the order service has an unused `PaymentInitiationView`, but no order-side caller or
+payment port reaches it. The storefront therefore cannot yet open Razorpay checkout through the
+order service. The amount invariant above is what makes that endpoint safe to wire up later, so it
+was fixed first; wiring the initiation path is the next piece of work.
 
 ---
 
@@ -491,6 +519,8 @@ configured for the variant. A variant with no recipe consumes nothing.
 |---|---|---|
 | SchemaAndPersistenceIT | 12 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; the order-number sequence issues distinct values; the stored total must equal items plus delivery charge; a negative amount and a foreign currency are rejected; the order number is unique; an orphan order line is rejected; a product delete cascades to lines, history and notes; one cart per customer; an idempotency key is unique per scope and reusable across scopes |
 | OutboundClientTest | 11 | The catalogue, identity and delivery clients against a real HTTP server: the exact request each sends (batch variant query, customer profile path, PIN-code path), a missing variant is absent rather than an error, an unknown customer or foreign address id is empty, and a downstream 5xx becomes `DEPENDENCY_UNAVAILABLE` rather than a business error or a silent "not serviceable" |
+| PaymentEventsIT | 6 | The order side of the payment saga over a real RabbitMQ broker: a `payment.captured` for the exact total confirms the order and releases it into preparation by emitting `order.confirmed`; a capture for the wrong amount is refused (`PAYMENT_AMOUNT_MISMATCH`) and the order stays `PAYMENT_PENDING` with no `order.confirmed`; a redelivered capture is idempotent (one confirmation, not two); a `payment.failed` records the failure without un-paying; a refund event marks the order refunded; an event for an unknown order is retried and dead-lettered rather than silently acked |
+| PaymentEventsListenerTest | 8 | The listener's dispatch on its own, with no broker: each of the four routing keys calls the right command method, a capture passes the provider ids and the amount through, a malformed body is rejected, a missing or non-UUID order id is refused, and an unknown routing key is ignored — the boundary between "this is our event" and "this is not" is pinned without a container |
 
 ### Payment integration tests (`mvn verify`)
 

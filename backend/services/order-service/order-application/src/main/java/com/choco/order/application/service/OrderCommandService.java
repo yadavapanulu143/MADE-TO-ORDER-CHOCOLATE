@@ -1,5 +1,6 @@
 package com.choco.order.application.service;
 
+import com.choco.core.domain.Money;
 import com.choco.core.error.BusinessRuleException;
 import com.choco.core.error.ErrorCode;
 import com.choco.core.error.NotFoundException;
@@ -16,6 +17,7 @@ import com.choco.order.application.dto.OrderView;
 import com.choco.order.application.port.AuditLogPort;
 import com.choco.order.domain.order.Order;
 import com.choco.order.domain.port.OrderRepository;
+import java.util.Currency;
 import java.util.UUID;
 
 /**
@@ -174,13 +176,26 @@ public class OrderCommandService {
      * <p>This is the only way an order becomes {@code CONFIRMED} and the only way preparation is
      * unlocked. It is idempotent, so a webhook redelivered after the redirect already confirmed the
      * order does nothing the second time.
+     *
+     * <p>The amount the provider collected is passed through and checked against the order's frozen
+     * total. {@code paidAmountMinorUnits} may be null when the caller has no amount to offer (an
+     * internal test seam); a payment that reaches this method from the payment service always has one.
      */
-    public void markPaid(UUID orderId, String paymentId, String providerOrderId) {
+    public void markPaid(UUID orderId, String paymentId, String providerOrderId,
+                         Long paidAmountMinorUnits, String currency) {
         transactions.execute(() -> {
             Order order = require(orderId);
-            order.markPaid(paymentId, providerOrderId, clock.now());
+            Money paid = paidAmountMinorUnits == null ? null
+                    : Money.ofMinorUnits(paidAmountMinorUnits, Currency.getInstance(
+                            currency == null ? "INR" : currency));
+            order.markPaid(paymentId, providerOrderId, paid, clock.now());
             persist(order);
         });
+    }
+
+    /** Records a verified payment with no amount cross-check, for callers that hold no amount. */
+    public void markPaid(UUID orderId, String paymentId, String providerOrderId) {
+        markPaid(orderId, paymentId, providerOrderId, null, null);
     }
 
     /** Records a failed or unverifiable payment. */

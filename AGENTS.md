@@ -358,6 +358,23 @@ The order service follows the same five-module shape as identity and catalog. Th
 - **Payment state is a projection of a verified fact.** Nothing in this service decides a payment
   succeeded; a `payment.captured` event from the payment service does. A browser redirect is never
   trusted.
+- **The payment outcome arrives as an event, and only as an event.** `PaymentEventsListener` on the
+  order service's own durable queue (`choco.order-service`, bound to `payment.captured`, `payment.failed`,
+  `payment.pending` and `payment.refund-processed`) is the sole path by which an order learns a payment
+  succeeded, failed or was refunded. There is deliberately **no HTTP endpoint** that marks an order paid:
+  a browser must never be able to confirm its own payment. When this consumer was missing the whole
+  saga was dead — an order could be paid and stay `PAYMENT_PENDING` forever, and the fulfilment service
+  never received `order.confirmed`. Do not reintroduce a synchronous "mark paid" endpoint.
+- **A capture must be for the order's exact total, or it is refused.** `Order.markPaid` takes the amount
+  the provider collected and compares it to the order's frozen `total()`, throwing
+  `PAYMENT_AMOUNT_MISMATCH` on any difference. This is not belt-and-braces: the initiate endpoint takes
+  a caller-supplied amount, so without this check a ₹1 payment would confirm a ₹5,000 order. The check
+  runs *before* the idempotency shortcut, so a wrong-amount capture is refused even on a redelivery.
+  Any new path that confirms an order must pass the collected amount through.
+- **Every listener queue must reject, not requeue, on repeated failure.** `default-requeue-rejected: false`
+  with a bounded retry is set on both `order-service` and `fulfilment-service`. Without it a message that
+  always fails is redelivered in a tight loop forever, pegging a consumer and hiding the fault; with it
+  the message is dead-lettered where an operator can see and replay it.
 - **Money stays in paise.** `Money.inr(...)`, integer arithmetic, no `double` anywhere.
 - **The order number comes from a database sequence**, never from a count or a timestamp, so two
   concurrent checkouts cannot be handed the same number.

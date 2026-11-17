@@ -49,6 +49,18 @@ spring:
         # One message at a time per consumer: the capacity check takes a lock, and prefetching a batch
         # would have several hand-overs queueing behind each other for no throughput gain.
         prefetch: 1
+        # Reject after the retries below are exhausted, instead of requeueing. Without this a hand-over
+        # that always fails is redelivered forever in a tight loop; rejecting routes it to the
+        # dead-letter queue, where an operator can see and replay it.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          # A few bounded attempts absorb a transient failure (a brief database blip) before the
+          # hand-over is dead-lettered, so a recoverable fault does not need an operator.
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
 
 choco:
   security:

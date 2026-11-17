@@ -190,6 +190,25 @@ public class Order extends AggregateRoot {
      * duplicate event is emitted.
      */
     public void markPaid(String paymentId, String providerOrderId, Instant now) {
+        markPaid(paymentId, providerOrderId, null, now);
+    }
+
+    /**
+     * Records a verified payment, checking that the amount collected is the amount owed.
+     *
+     * <p>The amount check is the one thing standing between a customer and a discounted chocolate:
+     * the payment the customer initiates is for whatever amount the caller asks for, so without this
+     * a ₹1 payment could confirm a ₹5,000 order. The figure compared against is the order's own frozen
+     * total, taken at checkout and never re-derived, so a later catalogue change cannot move it.
+     *
+     * <p>It is checked before the idempotency shortcut so that a capture naming the wrong amount is
+     * refused even on a redelivery, rather than being waved through as a replay.
+     */
+    public void markPaid(String paymentId, String providerOrderId, Money paidAmount, Instant now) {
+        if (paidAmount != null && !paidAmount.equals(total)) {
+            throw new BusinessRuleException(ErrorCode.PAYMENT_AMOUNT_MISMATCH,
+                    "The amount paid does not match the order total");
+        }
         // Check for a conflicting payment before the idempotency shortcut. A duplicate confirmation of
         // the same payment is a harmless replay; a confirmation naming a *different* payment for an
         // order that is already paid is a serious inconsistency and must be refused, not swallowed.

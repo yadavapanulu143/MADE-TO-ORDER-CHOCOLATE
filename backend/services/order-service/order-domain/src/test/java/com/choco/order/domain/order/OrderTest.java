@@ -132,6 +132,54 @@ class OrderTest {
         }
 
         @Test
+        @DisplayName("a capture for the right amount is accepted")
+        void captureForTheExactTotalIsAccepted() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            // items 10000 + delivery 5000 = 15000
+            order.markPaid("pay_123", "order_123", Money.inr(15000), LATER);
+
+            assertThat(order.status()).isEqualTo(OrderStatus.CONFIRMED);
+            assertThat(order.paymentStatus()).isEqualTo(PaymentStatus.PAID);
+        }
+
+        @Test
+        @DisplayName("a capture for less than the total is refused, so a cheap payment cannot buy the order")
+        void captureForLessThanTheTotalIsRefused() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+
+            assertThatThrownBy(() -> order.markPaid("pay_123", "order_123", Money.inr(100), LATER))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .extracting(ex -> ((BusinessRuleException) ex).errorCode())
+                    .isEqualTo(ErrorCode.PAYMENT_AMOUNT_MISMATCH);
+
+            assertThat(order.status()).isNotEqualTo(OrderStatus.CONFIRMED);
+            assertThat(order.paymentStatus()).isNotEqualTo(PaymentStatus.PAID);
+        }
+
+        @Test
+        @DisplayName("a capture for more than the total is refused rather than accepted silently")
+        void captureForMoreThanTheTotalIsRefused() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+
+            assertThatThrownBy(() -> order.markPaid("pay_123", "order_123", Money.inr(99999), LATER))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .extracting(ex -> ((BusinessRuleException) ex).errorCode())
+                    .isEqualTo(ErrorCode.PAYMENT_AMOUNT_MISMATCH);
+        }
+
+        @Test
+        @DisplayName("a wrong-amount capture is refused even when the order is already paid")
+        void wrongAmountIsRefusedOnAReplayToo() {
+            Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));
+            order.markPaid("pay_123", "order_123", Money.inr(15000), LATER);
+
+            assertThatThrownBy(() -> order.markPaid("pay_123", "order_123", Money.inr(100), LATER))
+                    .isInstanceOf(BusinessRuleException.class)
+                    .extracting(ex -> ((BusinessRuleException) ex).errorCode())
+                    .isEqualTo(ErrorCode.PAYMENT_AMOUNT_MISMATCH);
+        }
+
+        @Test
         @DisplayName("a duplicate confirmation is idempotent and emits no second event")
         void duplicateConfirmationIsIdempotent() {
             Order order = OrderTestSupport.newOrder(OrderTestSupport.line(Money.inr(10000), 1));

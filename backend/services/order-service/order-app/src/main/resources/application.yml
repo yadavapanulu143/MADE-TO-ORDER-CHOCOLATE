@@ -41,13 +41,34 @@ spring:
     port: ${CHOCO_RABBITMQ_PORT:5672}
     username: ${CHOCO_RABBITMQ_USER:choco}
     password: ${CHOCO_RABBITMQ_PASSWORD:choco_rabbit_pw}
+    listener:
+      simple:
+        # Acknowledge only after the handler returns, so a crash mid-handling redelivers the event
+        # rather than losing it. The handler is idempotent, so a redelivery is safe.
+        acknowledge-mode: auto
+        # One message at a time: handling a payment event takes a row lock on the order, and
+        # prefetching a batch would have several events queueing behind each other for no gain.
+        prefetch: 1
+        # Reject after the retries below are exhausted, instead of requeueing. Without this a message
+        # that always fails — a payment event naming an order this service does not have — is
+        # redelivered forever in a tight loop, pegging a consumer and hiding the fault. Rejecting routes
+        # it to the dead-letter queue, where an operator can see and replay it.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          # A few bounded attempts absorb a transient failure (a brief database blip) before the
+          # message is dead-lettered, so a recoverable fault does not need an operator.
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
 
 choco:
   security:
     issuer: choco-identity
     # The order service has no public endpoints. A cart, an order and a delivery address are all the
-    # signed-in customer's own data, so every path requires a token; the payment webhook path is the
-    # one deliberate exception and is added when the payment listener is implemented.
+    # signed-in customer's own data, so every path requires a token. A payment outcome arrives as an
+    # event from the payment service, not over HTTP, so there is no inbound public path to add.
     public-paths: []
     jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
   cors:

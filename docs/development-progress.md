@@ -83,6 +83,10 @@ payment port reaches it. The storefront therefore cannot yet open Razorpay check
 order service. The amount invariant above is what makes that endpoint safe to wire up later, so it
 was fixed first; wiring the initiation path is the next piece of work.
 
+**Push status.** This milestone is pushed to `origin/main` at commit `98a9f36`; the remote hash was
+verified equal to the local hash after the push. The push succeeded on the first attempt this
+session.
+
 ---
 
 ## Phase 1 — Project foundation

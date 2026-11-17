@@ -49,11 +49,11 @@ If it blocks again: grant the GitHub App `contents: write` on `yadavapanulu143/M
 or supply a user PAT with `repo` scope as `$GITHUB_TOKEN`. No force-push, history rewrite or
 credential handling was performed.
 
-Latest milestone (Phase 6, payment-service: Razorpay orders, verification, webhooks, refunds and
-disputes) is pushed to `origin/main` at commit `707f193`; the remote hash was verified equal to the
-local hash after the push. The push succeeded on the first attempt this session, so no token refresh
-was needed. The previous milestone (Phase 5c, order-service persistence and app bootstrap) is at
-`1014bd4`.
+Latest milestone (Phases 7 and 8, fulfilment-service: made-to-order production, ingredients and
+seller-managed delivery) is pushed to `origin/main` at commit `6c86892`; the remote hash was verified
+equal to the local hash after the push. The push succeeded on the first attempt this session, so no
+token refresh was needed. The previous milestone (Phase 6, payment-service: Razorpay orders,
+verification, webhooks, refunds and disputes) is at `707f193`.
 
 ---
 

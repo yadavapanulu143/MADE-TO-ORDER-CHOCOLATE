@@ -29,6 +29,8 @@ integration and future session. They are not optional and are not renegotiated p
    Admin Dashboard → Docker Compose/Deployment/CI-CD → End-to-End Testing and Handover. No
    priority-based reordering. Finish one module before starting the next, then proceed without
    asking.
+   - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
+     Razorpay Payment (done, `707f193`)**. The next module is **Made-to-Order Production** (Phase 7).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB

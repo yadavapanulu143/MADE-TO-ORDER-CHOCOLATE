@@ -56,6 +56,12 @@ equal to the local hash after the push. The push succeeded on the first attempt 
 token refresh was needed. The previous milestone (Phase 6, payment-service: Razorpay orders,
 verification, webhooks, refunds and disputes) is at `707f193`.
 
+**Reporting milestone pushed.** The reporting service (read models, dashboards, CSV/XLSX exports) and
+the gateway routing coverage for its surface are pushed to `origin/main` at commit `105fb6d`; the
+remote hash was verified equal to the local hash (`git rev-parse HEAD` == `git rev-parse origin/main`)
+and the working tree is clean. The push succeeded on the first attempt; no token refresh, force-push
+or history rewrite was needed. The preceding milestone (invoice issuance and access) is at `4a708c7`.
+
 ---
 
 ## Distributed consistency review — the order↔payment saga

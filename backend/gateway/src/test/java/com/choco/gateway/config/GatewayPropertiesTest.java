@@ -113,6 +113,19 @@ class GatewayPropertiesTest {
         }
 
         @Test
+        void doesNotOpenTheReportingOrExportSurface() {
+            GatewayProperties properties = new GatewayProperties();
+
+            // Reports and exports aggregate every customer's data, and an export is a file that leaves
+            // the platform. Neither may be reachable without a token; the reporting service's own
+            // method security then requires the report permission on top of a valid identity.
+            assertThat(properties.getPublicPaths())
+                    .noneMatch(path -> path.startsWith("/api/v1/reports")
+                            || path.startsWith("/api/v1/exports")
+                            || path.startsWith("/api/v1/dashboard"));
+        }
+
+        @Test
         void nullPublicPathsDegradesToEmptyList() {
             GatewayProperties properties = new GatewayProperties();
             properties.setPublicPaths(null);

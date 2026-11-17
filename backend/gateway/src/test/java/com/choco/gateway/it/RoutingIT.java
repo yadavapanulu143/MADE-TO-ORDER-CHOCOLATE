@@ -28,6 +28,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
     private static final MockWebServer PAYMENT = downstream();
     private static final MockWebServer FULFILMENT = downstream();
     private static final MockWebServer NOTIFICATION = downstream();
+    private static final MockWebServer REPORTING = downstream();
 
     private static MockWebServer downstream() {
         MockWebServer server = new MockWebServer();
@@ -57,6 +58,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         registry.add("choco.gateway.services.payment", () -> PAYMENT.url("/").toString());
         registry.add("choco.gateway.services.fulfilment", () -> FULFILMENT.url("/").toString());
         registry.add("choco.gateway.services.notification", () -> NOTIFICATION.url("/").toString());
+        registry.add("choco.gateway.services.reporting", () -> REPORTING.url("/").toString());
     }
 
     @AfterAll
@@ -67,6 +69,7 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
         PAYMENT.shutdown();
         FULFILMENT.shutdown();
         NOTIFICATION.shutdown();
+        REPORTING.shutdown();
     }
 
     @Test
@@ -302,6 +305,58 @@ class RoutingIT extends AbstractGatewayIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(401);
         assertThat(NOTIFICATION.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("the seller's report surface reaches the reporting service with the token intact")
+    void reportReachesReportingService() {
+        HttpResponse<String> response = get("/api/v1/reports/SALES?days=30", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/reports/SALES?days=30");
+        assertThat(json(response).get("authorization").asText()).startsWith("Bearer ");
+    }
+
+    @Test
+    @DisplayName("the export surface reaches the reporting service")
+    void exportReachesReportingService() {
+        HttpResponse<String> response = get("/api/v1/exports/ORDERS?format=CSV", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/exports/ORDERS?format=CSV");
+    }
+
+    @Test
+    @DisplayName("the reporting surface is not public: no token is refused at the edge")
+    void reportingIsNotPublic() throws Exception {
+        int before = REPORTING.getRequestCount();
+
+        HttpResponse<String> response = get("/api/v1/reports/SALES?days=30", null);
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        // Refused at the edge, so nothing was forwarded to the reporting service.
+        assertThat(REPORTING.getRequestCount()).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("a customer token is forwarded but the reporting service is the one that refuses it")
+    void customerReportRequestIsForwardedAndRefusedDownstream() {
+        HttpResponse<String> response = get("/api/v1/reports/SALES?days=30", customerToken());
+
+        // The gateway authenticates but does not know the report permission, so the request is
+        // forwarded and the reporting service's own method security answers. That split is deliberate:
+        // the edge proves identity, the service proves authority.
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("authorization").asText()).startsWith("Bearer ");
+    }
+
+    @Test
+    @DisplayName("the dashboard surface reaches the reporting service")
+    void dashboardReachesReportingService() {
+        HttpResponse<String> response = get("/api/v1/dashboard", adminToken());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(json(response).get("path").asText()).isEqualTo("/api/v1/dashboard");
     }
 
     @Test

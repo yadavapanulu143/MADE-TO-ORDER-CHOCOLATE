@@ -1,0 +1,90 @@
+server:
+  port: 8087
+  shutdown: graceful
+
+spring:
+  application:
+    name: reporting-service
+  datasource:
+    url: ${CHOCO_REPORTING_DB_URL:jdbc:postgresql://localhost:5432/choco_reporting}
+    username: ${CHOCO_REPORTING_DB_USER:choco_reporting}
+    password: ${CHOCO_REPORTING_DB_PASSWORD:choco_reporting_pw}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate validates that the entities match it and never alters it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+  data:
+    redis:
+      host: ${CHOCO_REDIS_HOST:localhost}
+      port: ${CHOCO_REDIS_PORT:6379}
+      password: ${CHOCO_REDIS_PASSWORD:choco_redis_pw}
+      timeout: 2s
+  rabbitmq:
+    host: ${CHOCO_RABBITMQ_HOST:localhost}
+    port: ${CHOCO_RABBITMQ_PORT:5672}
+    username: ${CHOCO_RABBITMQ_USER:choco}
+    password: ${CHOCO_RABBITMQ_PASSWORD:choco_rabbit_pw}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        # One message at a time per consumer. A projection is a small upsert; prefetching a batch
+        # would hold several rows locked for no benefit.
+        prefetch: 1
+        # Reject rather than requeue once the in-memory retries are exhausted, so a poison message
+        # lands in the dead-letter queue instead of being redelivered forever.
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
+
+choco:
+  security:
+    issuer: choco-identity
+    # Every path in this service is either a RabbitMQ consumer (not HTTP) or a permission-gated
+    # reporting endpoint, so nothing is public. The health probes are handled by the actuator.
+    public-paths: []
+    jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
+  cors:
+    allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}
+  outbox:
+    relay-interval-ms: ${CHOCO_OUTBOX_RELAY_INTERVAL_MS:2000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+  tracing:
+    sampling:
+      probability: ${CHOCO_TRACE_SAMPLING:1.0}
+  otlp:
+    tracing:
+      endpoint: ${CHOCO_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+
+logging:
+  level:
+    com.choco: ${CHOCO_LOG_LEVEL:INFO}

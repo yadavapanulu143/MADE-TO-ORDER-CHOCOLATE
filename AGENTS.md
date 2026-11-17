@@ -32,9 +32,9 @@ integration and future session. They are not optional and are not renegotiated p
    - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
      Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
      the `fulfilment-service`) → Notification (done, the `notification-service`) → Invoice issuance
-     and access (done, in the `order-service`) → Reporting/Exports (in progress, the
-     `reporting-service`)**. The next module is the remainder of **Invoices, Reporting and Customer
-     Exports** (Phase 11), then the Storefront (Phase 12) and Admin Dashboard (Phase 13).
+     and access (done, in the `order-service`) → Reporting and Customer Exports (done, the
+     `reporting-service`)**. The next module is the **Customer Storefront** (Phase 12), then the Admin
+     Dashboard (Phase 13).
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -481,6 +481,43 @@ specific to it:
 - **The admin log is `/api/v1/admin/notifications`,** gated by `notification:read` /
   `notification:write` and routed by the gateway. The public path list never opens it.
 
+## Reporting service conventions
+
+The reporting service (port 8087, database `choco_reporting`) is a **pure consumer**: it owns no
+aggregate, accepts no command and publishes no event. Every table is a derived read model that can be
+rebuilt from the event log. Things specific to it:
+
+- **A projection is upserted by the producer's own identifier, which makes every handler idempotent by
+  construction.** `order_projection` is keyed on the order id, `payment_projection` on the payment id,
+  `production_projection` on the job id. A redelivered event overwrites the row with the same values
+  instead of adding a second, so at-least-once delivery needs no separate dedupe table — there are no
+  append-only rows to duplicate. `ReportingJourneyIT` proves a redelivered `order.placed` leaves one row.
+- **Copy the producer's status verbatim; never invent a reporting-local name for it.** The fulfilment
+  service sends `PREPARATION_STARTED`, `ATTEMPT_FAILED` and its other status names. A projection that
+  translates them into its own vocabulary is a second place for the two services to disagree, and the
+  disagreement is silent: the column is written with a value the reports do not recognise while the
+  unit test — which uses the same invented name — stays green. This exact bug was hit and fixed.
+- **The event-type→use-case map lives in the inbound adapter.** `PlatformEventsListener` is the only
+  class that knows the wire names; `ProjectionService` takes a plain `Map<String, Object>`, so every
+  projection rule is a unit test with no broker and no database.
+- **One refund, one row.** A refund request and its processed counterpart share the key
+  `refund-<orderId>`, so a refund is not counted once as pending and again as paid.
+- **A report has a ceiling and says so.** `ReportLimits.MAX_REPORT_ROWS` refuses a window that fills the
+  cap rather than truncating and presenting a partial total as if it were the whole.
+- **An export declares its columns.** Each `ExportType` names the columns it may emit and the dataset
+  is built from that list alone, so a query returning more cannot leak more. The customer export masks
+  the email and mobile and needs `customer:export` on top of `report:read`. Every export writes an
+  audit row (actor, dataset, format, row count) — never the exported content. The download is an
+  attachment with `Cache-Control: no-store`.
+- **CSV is neutralised against formula injection.** A cell beginning with `=`, `+`, `-`, `@`, tab or
+  carriage return is prefixed with `'`, because a spreadsheet opens such a cell as a formula.
+- **The spreadsheet library (`org.apache.poi`) never leaves `..reporting.adapter.out.export..`.**
+  `CleanArchitectureTest` fails the build if it appears anywhere else.
+- **The surface is never public.** `/api/v1/reports/**`, `/api/v1/exports/**` and
+  `/api/v1/dashboard/**` are routed by the gateway and never in its public-path list; the service's own
+  method security requires `report:read` on every endpoint, so the edge authenticates and the service
+  authorises. `GatewayPropertiesTest` and `RoutingIT` both pin it.
+
 ## ACID Compliance and Distributed Transaction Consistency
 
 This section is permanent and must stay current as modules land.
@@ -519,8 +556,10 @@ so consistency is eventual and is built from:
 optimistic locking by the mapper-version tests; concurrent processing by `OrderPaymentIT` (two
 simultaneous payment starts) and `FulfilmentJourneyIT` (idempotent consumption over a real broker);
 outbox atomicity and publication by `OutboxRelayIT`; duplicate webhook and verify idempotency by
-`PaymentJourneyIT`; provider-failure isolation by `NotificationJourneyIT`. Backups and recovery are
-documented with deployment (Phase 14) and are not yet verified end to end.
+`PaymentJourneyIT`; provider-failure isolation by `NotificationJourneyIT`; read-model idempotency and
+the projection's transaction boundary by `ReportingJourneyIT` (a redelivered event leaves one row, a
+refund request and its processing are one row). Backups and recovery are documented with deployment
+(Phase 14) and are not yet verified end to end.
 
 ## Security review
 
@@ -530,7 +569,7 @@ each module lands and as the deployment configuration is built.
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1088 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1195 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -557,14 +596,18 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 51 (15 unit + 36 integration: real Redis) |
+| gateway | 57 (16 unit + 41 integration: real Redis) |
 | fulfilment-domain | 88 |
 | fulfilment-application | 37 |
 | fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
 | notification-application | 34 |
 | notification-app | 24 (4 architecture + 20 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
-| **total** | **1088** |
+| reporting-domain | 20 |
+| reporting-application | 42 |
+| reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
+| reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
+| **total** | **1195** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently

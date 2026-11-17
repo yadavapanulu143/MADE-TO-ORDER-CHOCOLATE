@@ -37,7 +37,7 @@
     <module>services/payment-service</module>
     <module>services/fulfilment-service</module>
     <module>services/notification-service</module>
-    <!-- <module>services/reporting-service</module> -->
+    <module>services/reporting-service</module>
   </modules>
 
   <properties>
@@ -308,6 +308,28 @@
       <dependency>
         <groupId>com.choco</groupId>
         <artifactId>notification-adapters-in</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Reporting service layers -->
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>reporting-domain</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>reporting-application</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>reporting-adapters-out</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.choco</groupId>
+        <artifactId>reporting-adapters-in</artifactId>
         <version>${project.version}</version>
       </dependency>
     </dependencies>

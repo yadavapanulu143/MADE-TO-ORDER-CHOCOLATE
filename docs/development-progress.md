@@ -3,9 +3,10 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1088 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1195 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
-invoice surfaces, and the `order.invoice-issued` notification). Integration tests (`*IT`) run under the
+invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
+dashboards and CSV/XLSX exports). Integration tests (`*IT`) run under the
 `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
@@ -474,16 +475,76 @@ Endpoints: `GET /api/v1/invoices/me`, `GET /api/v1/invoices/me/{id}`, `GET /api/
 `POST /api/v1/admin/invoices/order/{orderId}` (seller). The gateway routes both prefixes to the order
 service; the administrative prefix is never public.
 
+## Reporting service (Phase 11 — Reporting and Customer Exports)
+
+The reporting service is a **pure consumer**: it owns no aggregate and accepts no command, and every
+table it holds is a derived read model it can rebuild from the event log. It exists so the seller's
+dashboard and reports do not fan out to seven services on every page load, and so the admin dashboard
+has one place to read cross-service facts from.
+
+- **One read model per producer fact, upserted by the producer's own identifier.** `order_projection`
+  is keyed on the order id, `payment_projection` on the payment id, `production_projection` on the job
+  id, and so on. Every handler is therefore idempotent by construction: a redelivered event overwrites
+  the row with the same values instead of adding a second, so at-least-once delivery needs no separate
+  dedupe table — the read model has no append-only rows to duplicate. `ReportingJourneyIT` proves a
+  redelivered `order.placed` leaves exactly one row.
+- **Producer statuses are copied verbatim.** The fulfilment service's production and delivery events
+  carry its own status names (`PREPARATION_STARTED`, `ATTEMPT_FAILED`, …). The projection stores the
+  status the event carries rather than translating it into a reporting-local vocabulary, because a
+  translation table is a second place for the two services to disagree. A real defect was fixed here:
+  the projection had invented `STARTED`/`READY_FOR_DISPATCH` constants the producer never sends, so the
+  status column would have been written as `null` for every real event while the unit test — which
+  used the invented names — stayed green. The constants now mirror the producer, and
+  `ProductionProjection`/`DeliveryProjection` assert it.
+- **The consumer maps event types to use cases in the adapter, not the application.** `PlatformEventsListener`
+  is the only class that knows the wire names; `ProjectionService` takes a plain map, so every
+  projection rule is a unit test with no broker and no database.
+- **A refund is one row, keyed on the order.** The request and its processed counterpart share the key
+  `refund-<orderId>`, so a refund is not counted once as pending and again as paid — the seller's report
+  would otherwise double every refund. `ProjectionService.refundProcessed` documents why the key is the
+  order and not the provider's refund id.
+- **Money is integer paise.** Revenue is a sum of `long` minor units, never a `double`; only a
+  **captured** payment counts toward revenue, and an unpaid order counts toward nothing.
+- **A report has a ceiling and says so.** `ReportLimits.MAX_REPORT_ROWS` (50 000) refuses a window that
+  fills the cap rather than truncating and presenting a partial total as if it were the whole: a
+  truncated total is a wrong answer that looks right, and the honest outcome is to make the seller
+  narrow the period.
+- **An export declares its columns.** Each `ExportType` names the columns it may emit, and the dataset
+  is built from that list alone, so a query that happened to return more cannot leak more. The customer
+  export masks the email and mobile (`a***a@example.test`, `******3210`) and is gated by
+  `customer:export` on top of `report:read`; the operational exports need only `report:read`.
+- **An export is attributable.** Every download writes an audit row naming the acting administrator,
+  the dataset, the format and the row count — never the exported content, which would make the audit
+  table the leak the export was meant to control. `AdminExportApiIT` asserts the row is written.
+- **The download cannot be cached.** The response carries a `Content-Disposition: attachment` header
+  and `Cache-Control: no-store`, so a browser does not keep a copy of customer data in its cache.
+- **CSV is neutralised against formula injection.** A cell beginning with `=`, `+`, `-`, `@`, tab or
+  carriage return is prefixed with `'`, because a spreadsheet opens such a cell as a formula — an export
+  is a file the seller will open in Excel, and a customer whose name is `=cmd|...` must not become code.
+  `CsvXlsxExportWriterTest` pins it.
+- **The spreadsheet library stays in the export adapter.** `CleanArchitectureTest` fails the build if
+  `org.apache.poi` appears anywhere outside `..reporting.adapter.out.export..`, so the domain and the
+  use cases never depend on the writer.
+- **The surface is not public.** `/api/v1/reports/**`, `/api/v1/exports/**` and `/api/v1/dashboard/**`
+  are routed by the gateway and never in its public-path list; the reporting service's own method
+  security requires `report:read` on every endpoint, so a customer token that the edge merely
+  authenticates is refused by the service. `GatewayPropertiesTest` and `RoutingIT` both pin it.
+
+Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDERS`, `PAYMENTS`,
+`PRODUCTION`, `DELIVERY`, `REFUNDS`, `CUSTOMERS`), `GET /api/v1/exports/{type}` (`CUSTOMERS`, `ORDERS`,
+`PAYMENTS`, `INVOICES`) with `?format=CSV|XLSX` and a `?days=` or `?from=&to=` window. All require
+`report:read`; the customer export additionally requires `customer:export`.
+
 ## Phase 11 — Testing and quality
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (845 green across every module) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (243 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification and the gateway) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (923 green across every module) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (272 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
-| 11.6 | Data privacy / export test | TODO — arrives with the customer export in Phase 11 |
+| 11.6 | Data privacy / export test | DONE — `AdminExportApiIT` proves the customer export masks the email and mobile (the raw values never appear in the file), the export needs `customer:export` beyond `report:read`, a customer token is refused, the download is `no-store` and the act is audited; `CsvXlsxExportWriterTest` proves a formula-injection cell is neutralised |
 | 11.7 | Security tests | IN PROGRESS — authz boundaries, ownership isolation and rate limiting are covered per service; a consolidated suite and `docs/security-review.md` are pending |
 
 ## Phase 12 — Deployment preparation
@@ -549,14 +610,18 @@ service; the administrative prefix is never public.
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 15 | 36 | 51 |
+| gateway | 16 | 41 | 57 |
 | fulfilment-domain | 88 | – | 88 |
 | fulfilment-application | 37 | – | 37 |
 | fulfilment-app | 4 | 24 | 28 |
 | notification-domain | 13 | – | 13 |
 | notification-application | 34 | – | 34 |
 | notification-app | 4 | 20 | 24 |
-| **Total** | **845** | **243** | **1088** |
+| reporting-domain | 20 | – | 20 |
+| reporting-application | 42 | – | 42 |
+| reporting-adapters-out | 10 | – | 10 |
+| reporting-app | 5 | 24 | 29 |
+| **Total** | **923** | **272** | **1195** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -567,7 +632,7 @@ files undercounts and a naive per-file sum is not the total.
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 24 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment, order, invoice and notification surfaces reach their services with a token and are refused without one |
+| RoutingIT | 29 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment, order, invoice and notification surfaces reach their services with a token and are refused without one; the report, export and dashboard surfaces reach the reporting service with the token intact and are refused at the edge without one |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
@@ -627,6 +692,22 @@ files undercounts and a naive per-file sum is not the total.
 | SchemaAndPersistenceIT | 11 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; every database constraint holds — a non-positive quantity, a negative stock level, a negative delivery charge and an out-of-range status are all rejected, and one delivery per order is enforced by a unique index |
 | FulfilmentJourneyIT | 12 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one; the customer sees only their own progress; the admin surface is closed to customers |
 | CleanArchitectureTest | 4 | The domain depends on no framework; the application layer depends on no adapter or persistence framework; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
+
+### Reporting integration tests (`mvn verify`)
+
+| Class | Tests | What it proves |
+|---|---|---|
+| SchemaAndPersistenceIT | 5 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; every projection table exists; a projection is keyed on the owning service's id, so a second row with the same id is refused; a required column cannot be null; and no column anywhere could hold a password, hash, OTP, token, secret, CVV or PIN |
+| ReportingJourneyIT | 11 | The projection over a real RabbitMQ broker and real PostgreSQL: an order is projected from `order.placed`, advanced by `order.confirmed` and never duplicated; a capture becomes a `PAID` payment keyed on the payment id; a production event stores the kitchen's own status name verbatim; a delivery is advanced in place by `delivery.failed`; a redelivered event leaves one row; a refund request and its processing are one row (not counted twice); the seller's report over HTTP reports the real figures; an event this service does not project is ignored; the window is echoed back; the dashboard is served to a report reader and refused to a customer; every report type is served |
+| AdminExportApiIT | 8 | The export surface over real HTTP: an operational export is an attachment with `no-store`; XLSX is served as a spreadsheet; the customer export needs `customer:export`, not just `report:read`; a customer token is refused; an unauthenticated export is refused; the customer export masks the email and mobile so the raw values never appear in the file; an export writes an audit row naming the actor; an unknown format is refused rather than defaulting silently |
+| CleanArchitectureTest | 5 | The domain depends on no framework; the application layer depends on no adapter, persistence or export framework; inbound adapters do not reach into persistence; the spreadsheet library never leaves the export adapter; nothing depends on the wiring configuration |
+
+### Bugs the reporting integration tests caught
+
+| Bug | Symptom | Fix |
+|---|---|---|
+| Producer status names invented in the projection | The fulfilment events carry `PREPARATION_STARTED` / `ATTEMPT_FAILED`, but the projection had defined its own `STARTED` / `READY_FOR_DISPATCH` constants. Every real event would have written a status the reports did not recognise, while the unit test — which used the invented names — stayed green | `ProductionProjection` / `DeliveryProjection` constants now mirror the producer verbatim; `ProjectionService` prefers the status carried by the event |
+| A refund counted twice | Keying the processed refund on the provider's refund id made a request and its processed counterpart two rows, so the seller's refund report counted one refund once as pending and again as paid | Key both on `refund-<orderId>`, the order the request named |
 
 ### Bugs the catalog integration tests caught
 

@@ -90,6 +90,16 @@ refresh token. Password reset tokens are single-use and time-bounded.
   listed, from configuration.
 - **Security headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, a no-referrer
   policy and HSTS are set on every service and at the gateway.
+- **Reports and exports are permission-gated and minimised.** The reporting service's read surface
+  (`/api/v1/reports/**`, `/api/v1/exports/**`, `/api/v1/dashboard/**`) requires `report:read` on every
+  endpoint, and the customer export additionally requires `customer:export` — checked again inside the
+  use case, not only on the controller. An export declares its columns, so a wider query cannot widen
+  the file; the customer export masks the email and mobile, and every export writes an audit row naming
+  the acting administrator, the dataset, the format and the row count. The download is an attachment
+  with `Cache-Control: no-store` so customer data is not cached by the browser, and CSV cells beginning
+  with `=`, `+`, `-`, `@`, tab or carriage return are neutralised against formula injection. No export
+  can reach a password, hash, OTP, token or secret: the export column list is a closed set and the
+  `ExportColumn` guard refuses any column naming an authentication artefact.
 
 ## 6. Payment security
 
@@ -165,7 +175,9 @@ verification of every price, total and payment amount; Razorpay checkout and web
 verification; duplicate-payment prevention; image-upload type, size and path-traversal protection;
 parameterised data access; correlation-id validation against header injection and log forging;
 gateway refusal of forged, expired and wrong-issuer tokens; unauthenticated requests refused at the
-edge and never forwarded.
+edge and never forwarded; reporting and export endpoints permission-gated with the customer export
+additionally gated by `customer:export`, contact details masked in the export and every download
+audited.
 
 ## 10. Dependency and secret scanning
 

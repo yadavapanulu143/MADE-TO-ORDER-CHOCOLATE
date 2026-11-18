@@ -41,6 +41,7 @@ public final class EventTypes {
     public static final String OUT_FOR_DELIVERY = "fulfilment.out-for-delivery";
     public static final String DELIVERY_DELIVERED = "fulfilment.delivery-delivered";
     public static final String DELIVERY_FAILED = "fulfilment.delivery-failed";
+    public static final String DELIVERY_RESCHEDULED = "fulfilment.delivery-rescheduled";
     public static final String LOW_STOCK_DETECTED = "fulfilment.low-stock";
 
     // notification-service

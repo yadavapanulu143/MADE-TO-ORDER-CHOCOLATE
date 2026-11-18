@@ -216,6 +216,45 @@ class FulfilmentJourneyIT extends AbstractFulfilmentIntegrationTest {
         }
 
         @Test
+        @DisplayName("a rescheduled delivery publishes an event, so the retry is not silent")
+        void reschedulingPublishesAnEvent() {
+            String orderId = UUID.randomUUID().toString();
+            publishOrderConfirmed(orderId, 1);
+            JsonNode jobs = awaitJobsFor(orderId, adminToken(ADMIN_ID), 1);
+            String jobId = jobs.get(0).get("id").asText();
+            String token = adminToken(ADMIN_ID);
+
+            for (String action : List.of("ACKNOWLEDGE", "START", "COMPLETE", "PACKAGING",
+                    "READY_FOR_DISPATCH")) {
+                post("/api/v1/admin/fulfilment/production/jobs/" + jobId + "/progress",
+                        jsonBody(Map.of("action", action)), token);
+            }
+            post("/api/v1/admin/fulfilment/deliveries/orders/" + orderId + "/assign",
+                    jsonBody(Map.of("deliveryPersonName", "Ravi", "deliveryPersonPhone", "9000000000")),
+                    token);
+            post("/api/v1/admin/fulfilment/deliveries/orders/" + orderId + "/progress",
+                    jsonBody(Map.of("action", "OUT_FOR_DELIVERY")), token);
+
+            // A failed attempt then a reschedule. The customer has to be told the seller arranged
+            // another attempt; a reschedule that moves the status but raises no event would leave the
+            // notification service blind to it.
+            HttpResponse<String> failed = post(
+                    "/api/v1/admin/fulfilment/deliveries/orders/" + orderId + "/progress",
+                    jsonBody(Map.of("action", "ATTEMPT_FAILED", "reason", "nobody home")), token);
+            assertThat(failed.statusCode()).isEqualTo(200);
+
+            HttpResponse<String> rescheduled = post(
+                    "/api/v1/admin/fulfilment/deliveries/orders/" + orderId + "/progress",
+                    jsonBody(Map.of("action", "RESCHEDULED", "notes", "second attempt tomorrow")), token);
+            assertThat(rescheduled.statusCode()).isEqualTo(200);
+            assertThat(json(rescheduled).get("status").asText()).isEqualTo("RESCHEDULED");
+
+            assertThat(receiveEvent(EventTypes.DELIVERY_RESCHEDULED, orderId))
+                    .as("the delivery-rescheduled event must reach the broker")
+                    .isTrue();
+        }
+
+        @Test
         @DisplayName("an illegal preparation jump is refused with a 4xx, not silently applied")
         void illegalJumpIsRefused() {
             String orderId = UUID.randomUUID().toString();

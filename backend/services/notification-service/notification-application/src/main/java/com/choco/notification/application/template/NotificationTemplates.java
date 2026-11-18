@@ -215,6 +215,15 @@ public final class NotificationTemplates {
                 detail, please contact us.
                 """);
 
+        put(NotificationType.DELIVERY_RESCHEDULED,
+                "Delivery rescheduled for order {{orderNumber}}",
+                """
+                Hi {{customerName}},
+
+                We have scheduled another delivery attempt for your order {{orderNumber}}. We will let
+                you know when it is out for delivery again.
+                """);
+
         // --- Operations (seller) ---------------------------------------------------------------
         put(NotificationType.LOW_STOCK_ALERT,
                 "Low stock: {{ingredientName}}",

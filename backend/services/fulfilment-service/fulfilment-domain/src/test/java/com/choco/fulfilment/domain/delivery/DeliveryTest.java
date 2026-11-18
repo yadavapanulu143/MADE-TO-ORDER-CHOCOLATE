@@ -7,6 +7,7 @@ import com.choco.core.error.BusinessRuleException;
 import com.choco.fulfilment.domain.event.DeliveryAssigned;
 import com.choco.fulfilment.domain.event.DeliveryDelivered;
 import com.choco.fulfilment.domain.event.DeliveryFailed;
+import com.choco.fulfilment.domain.event.DeliveryRescheduled;
 import com.choco.fulfilment.domain.event.OutForDelivery;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -152,6 +153,33 @@ class DeliveryTest {
 
         assertThat(delivery.status()).isEqualTo(DeliveryStatus.RESCHEDULED);
         assertThat(delivery.attemptCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a reschedule tells the customer, so the retry is not silent")
+    void rescheduleRaisesAnEvent() {
+        Delivery delivery = DeliveryTestSupport.outForDelivery();
+        delivery.recordFailedAttempt("nobody home", null, "seller", DeliveryTestSupport.LATER);
+        delivery.reschedule("second try tomorrow", "seller", DeliveryTestSupport.LATER);
+
+        // The status move alone is invisible to the customer: without this event the notification
+        // service is never told the seller has arranged another attempt, and the customer who asked
+        // for a re-delivery hears nothing.
+        assertThat(delivery.peekDomainEvents()).hasAtLeastOneElementOfType(DeliveryRescheduled.class);
+    }
+
+    @Test
+    @DisplayName("two reschedules on one delivery are two events, not one")
+    void eachRescheduleIsItsOwnEvent() {
+        Delivery delivery = DeliveryTestSupport.outForDelivery();
+        delivery.recordFailedAttempt("nobody home", null, "seller", DeliveryTestSupport.LATER);
+        delivery.reschedule("second try", "seller", DeliveryTestSupport.LATER);
+        delivery.markOutForDelivery("seller", DeliveryTestSupport.LATER);
+        delivery.recordFailedAttempt("nobody home again", null, "seller", DeliveryTestSupport.LATER);
+        delivery.reschedule("third try", "seller", DeliveryTestSupport.LATER);
+
+        assertThat(delivery.peekDomainEvents().stream()
+                .filter(e -> e instanceof DeliveryRescheduled)).hasSize(2);
     }
 
     @Test

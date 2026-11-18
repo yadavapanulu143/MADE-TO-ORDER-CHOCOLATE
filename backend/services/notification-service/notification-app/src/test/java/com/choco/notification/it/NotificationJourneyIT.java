@@ -233,6 +233,82 @@ class NotificationJourneyIT extends AbstractNotificationIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("a delivery-rescheduled event tells the customer a new attempt is planned")
+    void deliveryRescheduledReachesTheCustomer() throws Exception {
+        registerCustomer();
+
+        publish(EventTypes.DELIVERY_RESCHEDULED, "order-12", Map.of(
+                "eventId", "11111111-2222-3333-4444-555555555555",
+                "orderId", "order-12",
+                "orderNumber", "CHOCO-2026001-12",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-12",
+                "attemptNumber", 2));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            var messages = GREEN_MAIL.getReceivedMessages();
+            assertThat(messages).isNotEmpty();
+            var message = messages[messages.length - 1];
+            assertThat(message.getAllRecipients()[0].toString()).isEqualTo("asha@example.com");
+            assertThat(message.getSubject()).contains("CHOCO-2026001-12");
+        });
+    }
+
+    @Test
+    @DisplayName("a second reschedule on one delivery still tells the customer")
+    void aSecondRescheduleIsNotSwallowedByTheDedupeKey() throws Exception {
+        registerCustomer();
+
+        // Two genuine reschedules of the same delivery carry different event ids. Keying the dedupe on
+        // the delivery id alone would let the first swallow the second and the customer would never
+        // learn of the later attempt; only a redelivery of the *same* event must be suppressed.
+        publish(EventTypes.DELIVERY_RESCHEDULED, "order-13", Map.of(
+                "eventId", "aaaaaaaa-0000-0000-0000-000000000001",
+                "orderId", "order-13",
+                "orderNumber", "CHOCO-2026001-13",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-13"));
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(GREEN_MAIL.getReceivedMessages()).hasSize(1));
+
+        publish(EventTypes.DELIVERY_RESCHEDULED, "order-13", Map.of(
+                "eventId", "aaaaaaaa-0000-0000-0000-000000000002",
+                "orderId", "order-13",
+                "orderNumber", "CHOCO-2026001-13",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-13"));
+
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(GREEN_MAIL.getReceivedMessages()).hasSize(2));
+    }
+
+    @Test
+    @DisplayName("a redelivered reschedule event is still suppressed by its event id")
+    void aRedeliveredRescheduleIsDeduplicated() throws Exception {
+        registerCustomer();
+
+        // The same event, redelivered: identical event id. The event-id keying must still recognise the
+        // replay and send nothing — a redelivery is normal on at-least-once delivery, and the customer
+        // must not be told twice about the same attempt.
+        Map<String, Object> reschedule = Map.of(
+                "eventId", "bbbbbbbb-0000-0000-0000-000000000001",
+                "orderId", "order-14",
+                "orderNumber", "CHOCO-2026001-14",
+                "customerId", CUSTOMER_ID.toString(),
+                "deliveryId", "delivery-14");
+        publish(EventTypes.DELIVERY_RESCHEDULED, "order-14", reschedule);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                assertThat(GREEN_MAIL.getReceivedMessages()).hasSize(1));
+
+        publish(EventTypes.DELIVERY_RESCHEDULED, "order-14", reschedule);
+
+        Thread.sleep(2000);
+        assertThat(GREEN_MAIL.getReceivedMessages())
+                .as("a redelivery of the same event must not send a second message")
+                .hasSize(1);
+    }
+
     // --- helpers -------------------------------------------------------------------------------
 
     /** Flattens a multipart message to its text, so the assertion is on the content, not the envelope. */

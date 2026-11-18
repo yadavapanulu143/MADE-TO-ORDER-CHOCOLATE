@@ -8,6 +8,7 @@ import com.choco.core.error.ErrorCode;
 import com.choco.fulfilment.domain.event.DeliveryAssigned;
 import com.choco.fulfilment.domain.event.DeliveryDelivered;
 import com.choco.fulfilment.domain.event.DeliveryFailed;
+import com.choco.fulfilment.domain.event.DeliveryRescheduled;
 import com.choco.fulfilment.domain.event.OutForDelivery;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -184,6 +185,8 @@ public class Delivery extends AggregateRoot {
     public void reschedule(String notes, String actorId, Instant now) {
         moveTo(DeliveryStatus.RESCHEDULED, "Delivery rescheduled", actorId, now);
         recordAttempt(DeliveryStatus.RESCHEDULED, null, notes, now);
+        registerEvent(new DeliveryRescheduled(UUID.randomUUID(), now, id.toString(), orderId.toString(),
+                orderNumber, customerId.toString(), status.name(), attempts.size()));
     }
 
     /** The item came back, e.g. the customer refused it. Terminal. */

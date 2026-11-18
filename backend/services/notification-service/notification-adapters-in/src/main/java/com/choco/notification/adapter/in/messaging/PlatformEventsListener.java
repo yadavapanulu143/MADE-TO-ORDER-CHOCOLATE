@@ -82,6 +82,8 @@ class PlatformEventsListener {
             case EventTypes.OUT_FOR_DELIVERY -> deliveryEvent(payload, NotificationType.OUT_FOR_DELIVERY);
             case EventTypes.DELIVERY_DELIVERED -> deliveryEvent(payload, NotificationType.DELIVERY_DELIVERED);
             case EventTypes.DELIVERY_FAILED -> deliveryEvent(payload, NotificationType.DELIVERY_FAILED);
+            case EventTypes.DELIVERY_RESCHEDULED ->
+                    deliveryEvent(payload, NotificationType.DELIVERY_RESCHEDULED);
             default -> log.debug("Ignoring event {} on the notification events queue", eventType);
         }
     }
@@ -241,8 +243,14 @@ class PlatformEventsListener {
             variables.put("reason", orDefault(str(payload, "failureReason"),
                     "The delivery could not be completed"));
         }
+        // Keyed on the event's own id when it carries one, falling back to the delivery id. Keying on
+        // the delivery id alone would collapse every delivery step of one type on one delivery into a
+        // single message: a second failed attempt, or a reschedule after an earlier one, would find the
+        // first notification and send nothing, so the customer would never learn of the retry. The
+        // event id is stable across a broker redelivery, which is exactly the idempotency this needs.
+        String identity = orDefault(str(payload, "eventId"), str(payload, "deliveryId"));
         dispatchService.notify(new NotifyCommand(type,
-                dedupe(type.name(), orDefault(str(payload, "deliveryId"), orderId)),
+                dedupe(type.name(), orDefault(identity, orderId)),
                 orderId, str(payload, "customerId"), variables));
     }
 

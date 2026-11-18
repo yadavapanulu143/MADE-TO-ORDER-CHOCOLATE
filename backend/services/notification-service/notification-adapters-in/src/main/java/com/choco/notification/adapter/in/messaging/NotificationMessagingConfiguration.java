@@ -183,4 +183,10 @@ class NotificationMessagingConfiguration {
         return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
                 .with(EventTypes.DELIVERY_FAILED);
     }
+
+    @Bean
+    Binding deliveryRescheduledBinding(Queue notificationEventsQueue, TopicExchange chocoEventsExchange) {
+        return BindingBuilder.bind(notificationEventsQueue).to(chocoEventsExchange)
+                .with(EventTypes.DELIVERY_RESCHEDULED);
+    }
 }

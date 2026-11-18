@@ -182,8 +182,10 @@ public abstract class AbstractNotificationIntegrationTest {
      */
     protected void publish(String eventType, String aggregateId, Map<String, Object> payload) {
         Map<String, Object> body = new java.util.LinkedHashMap<>(payload);
-        body.put("eventId", UUID.randomUUID().toString());
-        body.put("occurredAt", Instant.now().toString());
+        // A caller that pins an event id is simulating a redelivery of one specific event; otherwise a
+        // fresh id stands for a new event. Without this a test could not tell the two apart.
+        body.putIfAbsent("eventId", UUID.randomUUID().toString());
+        body.putIfAbsent("occurredAt", Instant.now().toString());
         body.put("aggregateId", aggregateId);
 
         EventEnvelope envelope = EventEnvelope.of(UUID.randomUUID(), eventType, 1, aggregateId,

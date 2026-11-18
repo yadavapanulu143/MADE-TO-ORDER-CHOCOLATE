@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1262 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1269 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
 dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
@@ -67,6 +67,27 @@ the gateway routing coverage for its surface are pushed to `origin/main` at comm
 remote hash was verified equal to the local hash (`git rev-parse HEAD` == `git rev-parse origin/main`)
 and the working tree is clean. The push succeeded on the first attempt; no token refresh, force-push
 or history rewrite was needed. The preceding milestone (invoice issuance and access) is at `4a708c7`.
+
+**Delivery-rescheduled notification completed (Phase 10).** Auditing the notification service against
+the requirement list ("Delivery failed or rescheduled") found a real gap, not a missing test:
+`Delivery.reschedule()` moved the status but raised **no domain event**, so a customer who asked for a
+redelivery was never told one had been arranged — the one delivery outcome the requirement names
+explicitly, silently unreachable. The fix raises a new `fulfilment.delivery-rescheduled` event on every
+reschedule, adds the `DELIVERY_RESCHEDULED` event type, notification type and template, and binds the
+queue to the new routing key. `FulfilmentJourneyIT.reschedulingPublishesAnEvent` proves the event
+reaches the broker and `NotificationJourneyIT.deliveryRescheduledReachesTheCustomer` proves it becomes a
+message in the SMTP sink.
+
+**Delivery notifications now key the dedupe on the event id, not the delivery id (Phase 10).** The
+listener's `deliveryEvent` derived its dedupe key from the `deliveryId`, so every step of the same type
+on one delivery collapsed into a single message: a second failed attempt, or a reschedule after a
+failed attempt, was suppressed and the customer heard nothing. The key is now the payload's `eventId`
+(with a `deliveryId` fallback for an older payload), which is stable across a broker redelivery — the
+idempotency the dedupe actually needs — while a genuinely new event gets its own key.
+`NotificationJourneyIT.aSecondRescheduleIsNotSwallowedByTheDedupeKey` and
+`aRedeliveredRescheduleIsDeduplicated` pin both directions — a new event sends, the same event does
+not. `fulfilment-domain` moves 88 → 90, `fulfilment-app` 28 → 31, `notification-application` 34 → 35
+and `notification-app` 22 → 27 tests; the cumulative total moves 1262 → **1269**.
 
 **Serviceability public-path mismatch fixed (Phase 11.3).** Driving the whole journey with
 `scripts/e2e-journey.py` surfaced a real defect the per-service integration tests had missed: the
@@ -437,7 +458,7 @@ gateway.
 | 10.2 | SMS provider (configurable) | DONE — HTTP gateway sender; with no gateway URL configured, sends are logged and reported, never fabricated |
 | 10.3 | Registration/verification notifications | DONE — the identity service sends the OTP and welcome mail directly; the notification service consumes `customer.registered`/`customer.verified`/`customer.contact-changed` to keep its contact projection current, so later messages greet the customer by name |
 | 10.4 | Order + payment notifications | DONE — `order.placed`, `order.confirmed`, `order.cancelled`, `payment.captured`, `payment.failed`, `payment.pending` |
-| 10.5 | Production + delivery notifications | DONE — `production.started/completed`, `ready-for-dispatch`, `delivery.assigned/out-for-delivery/delivered/failed`. `fulfilment.delivery-assigned` is now actually raised: the fulfilment service's `Delivery.assign` drains the aggregate's events on the first `PENDING → ASSIGNED` edge, so the customer is told a delivery has been arranged. (A `packaging.completed` subscription was removed: the packaging transition raises no event, so the binding could never fire.) |
+| 10.5 | Production + delivery notifications | DONE — `production.started/completed`, `ready-for-dispatch`, `delivery.assigned/out-for-delivery/delivered/failed/rescheduled`. `fulfilment.delivery-assigned` is now actually raised: the fulfilment service's `Delivery.assign` drains the aggregate's events on the first `PENDING → ASSIGNED` edge, so the customer is told a delivery has been arranged. `fulfilment.delivery-rescheduled` is raised on every retry by `Delivery.reschedule` — before this the reschedule moved the status but raised nothing, so a customer who asked for another attempt was never told one was arranged. (A `packaging.completed` subscription was removed: the packaging transition raises no event, so the binding could never fire.) |
 | 10.6 | Cancellation/refund notifications | DONE — `refund.requested` and `dispute.raised` to the seller; `refund.processed` to the customer |
 | 10.7 | Configurable templates and provider configuration | DONE — templates in the application layer; provider settings from environment variables |
 | 10.8 | Delivery status tracking | DONE — every notification's status and attempt count is visible in the admin log |
@@ -452,7 +473,7 @@ gateway.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 5 | Flyway applied V1; Hibernate `validate` matches; a negative attempt count, a blank dedupe key and an out-of-range status are rejected, and a duplicate dedupe key is refused by the unique index |
-| NotificationJourneyIT | 8 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the event gave, and an `order.invoice-issued` emails the customer the invoice number and the billed total |
+| NotificationJourneyIT | 11 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the event gave, a rescheduled delivery tells the customer a new attempt is planned, a second reschedule on one delivery is not swallowed by the dedupe key (which is keyed on the event id, not the delivery id), and an `order.invoice-issued` emails the customer the invoice number and the billed total |
 | AdminNotificationApiIT | 7 | The admin log over real HTTP: list, counters and read are permission gated; a customer is refused; an unknown id is a 404; a delivered notification cannot be resent (409); a customer cannot trigger a resend (403) |
 | CleanArchitectureTest | 4 | The domain and application layers depend on no framework, adapter or provider SDK; the mail/SMS sender never leaks into the domain |
 
@@ -749,17 +770,17 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
 | gateway | 16 | 51 | 67 |
-| fulfilment-domain | 88 | – | 88 |
+| fulfilment-domain | 90 | – | 90 |
 | fulfilment-application | 37 | – | 37 |
-| fulfilment-app | 4 | 24 | 28 |
+| fulfilment-app | 4 | 27 | 31 |
 | notification-domain | 13 | – | 13 |
-| notification-application | 34 | – | 34 |
-| notification-app | 4 | 20 | 24 |
+| notification-application | 35 | – | 35 |
+| notification-app | 4 | 23 | 27 |
 | reporting-domain | 20 | – | 20 |
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **964** | **296** | **1260** |
+| **Total** | **967** | **302** | **1269** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -830,7 +851,7 @@ files undercounts and a naive per-file sum is not the total.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 11 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; every database constraint holds — a non-positive quantity, a negative stock level, a negative delivery charge and an out-of-range status are all rejected, and one delivery per order is enforced by a unique index |
-| FulfilmentJourneyIT | 15 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one, **and answers an anonymous visitor** (the gateway lists the path as public and the storefront's "Delivery areas" page is unauthenticated) while an anonymous visitor still cannot reach the administrative kitchen; the customer sees only their own progress; the admin surface is closed to customers |
+| FulfilmentJourneyIT | 16 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one, **and answers an anonymous visitor** (the gateway lists the path as public and the storefront's "Delivery areas" page is unauthenticated) while an anonymous visitor still cannot reach the administrative kitchen; the customer sees only their own progress; the admin surface is closed to customers; the delivery-assigned and delivery-rescheduled events actually reach the broker (a throwaway queue is bound and the envelope read, so a use case that saves but never drains its events fails the test) |
 | CleanArchitectureTest | 4 | The domain depends on no framework; the application layer depends on no adapter or persistence framework; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
 
 ### Reporting integration tests (`mvn verify`)

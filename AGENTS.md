@@ -707,7 +707,7 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1262 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1269 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -735,17 +735,17 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
 | gateway | 67 (16 unit + 51 integration: real Redis) |
-| fulfilment-domain | 88 |
+| fulfilment-domain | 90 |
 | fulfilment-application | 37 |
-| fulfilment-app | 30 (4 architecture + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
+| fulfilment-app | 31 (4 architecture + 27 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
-| notification-application | 34 |
-| notification-app | 24 (4 architecture + 20 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| notification-application | 35 |
+| notification-app | 27 (4 architecture + 23 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
 | reporting-domain | 20 |
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1262** |
+| **total** | **1269** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
@@ -847,8 +847,10 @@ chain verifies.
   order abandons its jobs, a serviceability quote answers a covered PIN with its charge and an
   uncovered one with a reason **and answers an anonymous visitor too** (the gateway lists the path as
   public and the storefront's "Delivery areas" page is unauthenticated, so the service must not keep
-  it protected), an anonymous visitor still cannot reach the administrative kitchen, and the
-  customer/admin boundary holds.
+  it protected), an anonymous visitor still cannot reach the administrative kitchen, the
+  customer/admin boundary holds, and the delivery-assigned and delivery-rescheduled events actually
+  reach the broker (a throwaway queue is bound and the envelope read, so a use case that saves but
+  never drains its events fails the test rather than passing on the HTTP 200 alone).
 - `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
   persistence technology; inbound adapters do not reach into persistence.
 
@@ -864,8 +866,11 @@ to end.
 - `NotificationJourneyIT` — a real event on the broker becomes one message in the SMTP sink: the
   greeting is filled from the contact projection, the dedupe key suppresses a redelivery, a provider
   outage is recorded on the notification rather than thrown, a low-stock alert renders the real level
-  and threshold, an assigned delivery reaches the customer, and a failed delivery carries the reason
-  the event gave (not the generic fallback a wrong field name would produce).
+  and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the
+  event gave (not the generic fallback a wrong field name would produce), a rescheduled delivery tells
+  the customer a new attempt is planned, a second reschedule of one delivery is not swallowed by the
+  dedupe key (keyed on the event id, not the delivery id) while a redelivery of the same event still
+  is, and an `order.invoice-issued` emails the customer the invoice number and the billed total.
 - `AdminNotificationApiIT` — the admin log over real HTTP: list, counters and read are permission
   gated, a customer is refused, an unknown id is a 404, a delivered notification cannot be resent
   (409) and a customer cannot trigger a resend (403).
@@ -875,10 +880,19 @@ to end.
 **The fulfilment service raises the delivery events the notification service consumes.**
 `Delivery.assign` drains the aggregate's events on the first `PENDING → ASSIGNED` edge, so
 `fulfilment.delivery-assigned` actually reaches the broker (a later re-assignment raises nothing — the
-delivery person is the seller's own staff). `FulfilmentJourneyIT.assigningPublishesAnEvent` proves it
-end to end by binding a throwaway queue to the exchange and reading the envelope. There is no
-`fulfilment.packaging-completed` event: the packaging transition raises nothing, so no consumer binds
-to it.
+delivery person is the seller's own staff). `Delivery.reschedule` raises `fulfilment.delivery-rescheduled`
+on every retry: without it a reschedule moves the status but tells the customer nothing, so the person
+who asked for another attempt hears nothing. `FulfilmentJourneyIT.assigningPublishesAnEvent` and
+`FulfilmentJourneyIT.reschedulingPublishesAnEvent` prove both end to end by binding a throwaway queue to
+the exchange and reading the envelope. There is no `fulfilment.packaging-completed` event: the packaging
+transition raises nothing, so no consumer binds to it.
+
+**Delivery notifications are keyed on the event id, not the delivery id.** `deliveryEvent` derives the
+dedupe key from the payload's `eventId` where it is carried (falling back to `deliveryId` for an older
+payload). Keying on the delivery id alone collapses every step of one type on one delivery into a single
+message, so a second failed attempt or a later reschedule would be swallowed and the customer would never
+learn of the retry; the event id is stable across a broker redelivery, which is exactly the idempotency
+the dedupe needs. `NotificationJourneyIT.aSecondRescheduleIsNotSwallowedByTheDedupeKey` pins it.
 
 **`FAILED` is a resting status.** A notification that exhausts its retry budget stays `FAILED` rather
 than falling back to `PENDING`, so a failure is visible in the admin log and resendable. The retry

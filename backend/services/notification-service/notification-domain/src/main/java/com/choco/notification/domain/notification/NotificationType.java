@@ -32,6 +32,7 @@ public enum NotificationType {
     OUT_FOR_DELIVERY(NotificationChannel.SMS, RecipientType.CUSTOMER),
     DELIVERY_DELIVERED(NotificationChannel.SMS, RecipientType.CUSTOMER),
     DELIVERY_FAILED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
+    DELIVERY_RESCHEDULED(NotificationChannel.EMAIL, RecipientType.CUSTOMER),
     LOW_STOCK_ALERT(NotificationChannel.EMAIL, RecipientType.ADMIN);
 
     private final NotificationChannel channel;

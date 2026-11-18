@@ -197,6 +197,30 @@ class OrderJourneyIT extends AbstractOrderIntegrationTest {
         }
 
         @Test
+        @DisplayName("placing an order appends order.placed to the outbox in the same transaction")
+        void placing_an_order_writes_the_outbox_row() {
+            stubHappyDownstream(49_900, 1, 10, 5_000, true);
+            addOneLine(2);
+
+            HttpResponse<String> response = send("POST", "/api/v1/checkout",
+                    jsonBody(Map.of("addressId", ADDRESS_ID.toString())),
+                    customerToken(CUSTOMER_ID), "checkout-key-outbox");
+
+            assertThat(response.statusCode()).isEqualTo(201);
+            String orderId = json(response).get("id").asText();
+            // Exactly one row, and the payload carries the frozen total the notification consumer
+            // needs — this is the hand-over the notification service depends on.
+            assertThat(countOutbox("order.placed")).isEqualTo(1);
+            JsonNode payload = outboxPayload("order.placed");
+            assertThat(payload).isNotNull();
+            assertThat(payload.get("orderId").asText()).isEqualTo(orderId);
+            assertThat(payload.get("customerId").asText()).isEqualTo(CUSTOMER_ID.toString());
+            assertThat(payload.get("totalMinorUnits").asLong()).isEqualTo(104_800);
+            assertThat(payload.get("currency").asText()).isEqualTo("INR");
+            assertThat(payload.get("lineCount").asInt()).isEqualTo(1);
+        }
+
+        @Test
         @DisplayName("the cart is emptied by a successful placement")
         void placing_clears_the_cart() {
             stubHappyDownstream(49_900, 1, 10, 5_000, true);
@@ -499,6 +523,33 @@ class OrderJourneyIT extends AbstractOrderIntegrationTest {
             return rows.getLong(1);
         } catch (Exception e) {
             throw new IllegalStateException("could not count orders", e);
+        }
+    }
+
+    private long countOutbox(String eventType) {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.prepareStatement(
+                     "SELECT count(*) FROM outbox_event WHERE event_type = ?")) {
+            statement.setString(1, eventType);
+            try (var rows = statement.executeQuery()) {
+                rows.next();
+                return rows.getLong(1);
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("could not count outbox rows", e);
+        }
+    }
+
+    private JsonNode outboxPayload(String eventType) {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.prepareStatement(
+                     "SELECT payload FROM outbox_event WHERE event_type = ?")) {
+            statement.setString(1, eventType);
+            try (var rows = statement.executeQuery()) {
+                return rows.next() ? objectMapper.readTree(rows.getString(1)) : null;
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("could not read the outbox payload", e);
         }
     }
 }

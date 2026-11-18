@@ -38,6 +38,7 @@ class CheckoutServiceTest {
     private StubCatalog catalog;
     private StubCustomers customers;
     private StubServiceability serviceability;
+    private Fakes.RecordingEventPublisher events;
     private InMemoryCartRepository carts;
     private InMemoryOrderRepository orders;
     private InMemoryIdempotencyRepository idempotency;
@@ -57,11 +58,12 @@ class CheckoutServiceTest {
         idempotency = new InMemoryIdempotencyRepository();
 
         Fakes.FixedClock clock = Fakes.FixedClock.startingAt("2026-01-01T10:00:00Z");
+        events = new Fakes.RecordingEventPublisher();
         cartService = new CartService(carts, catalog, clock, new Fakes.SequentialIdGenerator(),
                 new Fakes.DirectTransactionRunner());
         service = new CheckoutService(carts, orders, idempotency, catalog, customers, serviceability,
                 new FixedOrderNumbers(), clock, new Fakes.SequentialIdGenerator(),
-                new Fakes.DirectTransactionRunner());
+                new Fakes.DirectTransactionRunner(), events);
     }
 
     @Test
@@ -109,6 +111,38 @@ class CheckoutServiceTest {
         assertThat(order.totalMinorUnits()).isEqualTo(104800);
         assertThat(order.deliveryAddress().pincode()).isEqualTo("560001");
         assertThat(order.deliveryAddress().recipientName()).isEqualTo("Asha Rao");
+    }
+
+    @Test
+    @DisplayName("placing an order publishes exactly one order.placed event carrying the frozen total")
+    void placeOrderPublishesOrderPlaced() {
+        cartService.addLine(CUSTOMER, new AddToCartCommand(VARIANT, 2));
+
+        OrderView order = service.placeOrder(CUSTOMER, new CheckoutCommand(ADDRESS, null));
+
+        var placed = events.eventsOfType("order.placed");
+        assertThat(placed).hasSize(1);
+        assertThat(placed.get(0).aggregateId()).isEqualTo(order.id().toString());
+        assertThat(placed.get(0)).isInstanceOfSatisfying(
+                com.choco.order.domain.event.OrderPlaced.class, event -> {
+                    assertThat(event.customerId()).isEqualTo(CUSTOMER.toString());
+                    assertThat(event.orderNumber()).isEqualTo("CHOCO-00001");
+                    assertThat(event.totalMinorUnits()).isEqualTo(104800);
+                    assertThat(event.currency()).isEqualTo("INR");
+                    assertThat(event.lineCount()).isEqualTo(1);
+                });
+    }
+
+    @Test
+    @DisplayName("a checkout replay publishes nothing, because no new order was placed")
+    void checkoutReplayPublishesNothing() {
+        cartService.addLine(CUSTOMER, new AddToCartCommand(VARIANT, 2));
+        service.placeOrder(CUSTOMER, new CheckoutCommand(ADDRESS, "key-1"));
+        events.clear();
+
+        service.placeOrder(CUSTOMER, new CheckoutCommand(ADDRESS, "key-1"));
+
+        assertThat(events.events()).isEmpty();
     }
 
     @Test

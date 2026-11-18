@@ -9,6 +9,7 @@ import com.choco.core.error.IdempotencyConflictException;
 import com.choco.core.error.NotFoundException;
 import com.choco.core.error.ValidationException;
 import com.choco.core.port.Clock;
+import com.choco.core.port.EventPublisher;
 import com.choco.core.port.IdGenerator;
 import com.choco.core.port.TransactionRunner;
 import com.choco.order.application.command.CheckoutCommand;
@@ -66,12 +67,13 @@ public class CheckoutService {
     private final Clock clock;
     private final IdGenerator idGenerator;
     private final TransactionRunner transactions;
+    private final EventPublisher eventPublisher;
 
     public CheckoutService(CartRepository cartRepository, OrderRepository orderRepository,
                            IdempotencyRecordRepository idempotencyRepository, CatalogPort catalogPort,
                            CustomerPort customerPort, ServiceabilityPort serviceabilityPort,
                            OrderNumberGenerator orderNumbers, Clock clock, IdGenerator idGenerator,
-                           TransactionRunner transactions) {
+                           TransactionRunner transactions, EventPublisher eventPublisher) {
         this.cartRepository = cartRepository;
         this.orderRepository = orderRepository;
         this.idempotencyRepository = idempotencyRepository;
@@ -82,6 +84,7 @@ public class CheckoutService {
         this.clock = clock;
         this.idGenerator = idGenerator;
         this.transactions = transactions;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -154,6 +157,10 @@ public class CheckoutService {
                     serviceability.deliveryCharge(),
                     now);
             Order saved = orderRepository.save(order);
+            // Appended to the outbox in the same transaction as the order, so a committed order
+            // always publishes order.placed and a rollback publishes nothing. Without this the
+            // notification consumer never hears about a placed order.
+            eventPublisher.publishAll(order.pullDomainEvents());
             cart.clear(now);
             cartRepository.save(cart);
 

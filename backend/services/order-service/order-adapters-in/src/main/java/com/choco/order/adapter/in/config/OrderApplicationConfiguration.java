@@ -52,10 +52,11 @@ class OrderApplicationConfiguration {
                                     CatalogPort catalogPort, CustomerPort customerPort,
                                     ServiceabilityPort serviceabilityPort,
                                     OrderNumberGenerator orderNumberGenerator, Clock clock,
-                                    IdGenerator idGenerator, TransactionRunner transactionRunner) {
+                                    IdGenerator idGenerator, TransactionRunner transactionRunner,
+                                    EventPublisher eventPublisher) {
         return new CheckoutService(cartRepository, orderRepository, idempotencyRepository, catalogPort,
                 customerPort, serviceabilityPort, orderNumberGenerator, clock, idGenerator,
-                transactionRunner);
+                transactionRunner, eventPublisher);
     }
 
     @Bean

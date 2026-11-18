@@ -893,3 +893,26 @@ from compose (`choco` / `choco_rabbit_pw`). A dev SMTP sink on port 1025 is enou
 no provider selected for SMS yet, so codes are written to the log only while `CHOCO_LOG_OTP=true`
 (equivalently `choco.notifications.log-otp`). The default is `false` in both the shipped config and
 the `@Value` fallback, so a missing property fails closed; enabling it logs a startup warning.
+
+## The end-to-end harness
+
+`scripts/e2e-journey.py` drives the whole customer→seller journey against a running stack over the
+gateway: registration and both OTP channels, sign-in, an address, the public catalogue, a
+serviceability quote, checkout, a verified `payment.captured` capture, the kitchen job, preparation,
+dispatch, delivery, the notification fan-out, the invoice and the seller's dashboard and export. It is
+the only check that exercises every service together; the per-service `*IT` suites each prove one seam
+in isolation.
+
+Run it against a stack that is already up:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.app.yml up -d
+E2E_ADMIN_EMAIL=... E2E_ADMIN_PASSWORD=... python3 scripts/e2e-journey.py
+```
+
+It reads the mobile OTP from the identity log (so start the container with `CHOCO_LOG_OTP=true`) and
+the email OTP from Mailpit on port 8025. Without `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` it runs the
+customer journey and skips the seller stages. **It seeds its own fixtures:** when the catalogue is
+empty it creates and publishes a product through the seller API, and it covers the delivery PIN code
+before quoting, so it runs unchanged against a fresh volume. Do not make it depend on hand-seeded
+data — CI starts from an empty volume, and `.github/workflows/e2e.yml` runs this harness there.

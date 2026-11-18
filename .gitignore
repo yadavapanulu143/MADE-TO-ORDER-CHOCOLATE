@@ -37,3 +37,7 @@ logs/
 
 # Agent scratch
 .agent_tmp/
+
+# Python bytecode (scripts/e2e-journey.py)
+__pycache__/
+*.pyc

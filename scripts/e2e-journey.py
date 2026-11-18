@@ -232,6 +232,19 @@ def main() -> int:
     state: dict = {"customer_id": "", "token": "", "address_id": "", "variant_id": "",
                    "order_id": "", "order_total": 0, "jobs": [], "admin_token": ""}
 
+    def admin_login():
+        """Sign the seller in once. Needed both to seed a fresh stack and for the seller stages."""
+        status, body, _ = http("POST", "/api/v1/auth/admin/login",
+                               body={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        check(status == 200, f"admin sign-in -> {status}: {body}")
+        state["admin_token"] = body["tokens"]["accessToken"]
+
+    def require_admin():
+        check(bool(ADMIN_EMAIL and ADMIN_PASSWORD),
+              "this step needs a seller account: set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD")
+        if not state["admin_token"]:
+            admin_login()
+
     # ------------------------------------------------------------------ customer --
 
     def register():
@@ -300,7 +313,14 @@ def main() -> int:
     def catalogue():
         status, listing, _ = http("GET", "/api/v1/products?size=5")
         check(status == 200, f"expected 200, got {status}")
-        check(listing["content"], "the catalogue is empty")
+        if not listing["content"]:
+            # A fresh volume has no catalogue. Seed one through the seller API so the journey runs
+            # end to end on a clean stack (which is what CI starts from) instead of assuming a
+            # product was created by hand first.
+            seed_catalogue()
+            status, listing, _ = http("GET", "/api/v1/products?size=5")
+            check(status == 200, f"expected 200, got {status}")
+            check(listing["content"], "the catalogue is still empty after seeding")
         slug = listing["content"][0]["slug"]
         status, product, _ = http("GET", f"/api/v1/products/{slug}")
         check(status == 200, f"expected 200, got {status}")
@@ -308,7 +328,42 @@ def main() -> int:
         check(active, "no active variant to buy")
         state["variant_id"] = active[0]["id"]
 
+    def seed_catalogue():
+        require_admin()
+        # The name carries the run stamp: the catalogue is only seeded when it is empty, but a
+        # previous failed run can leave an unpublished draft behind, and the product name has to be
+        # unique. A stamped name never collides, so a rerun against a warm volume still works.
+        status, product, _ = http("POST", "/api/v1/admin/catalog/products",
+                                  token=state["admin_token"],
+                                  body={"name": f"Single-Origin Dark Bar {stamp}",
+                                        "shortDescription": "70% cocoa",
+                                        "description": "Rich and dark, made to order",
+                                        "preparationInfo": "Made fresh after payment",
+                                        "deliveryInfo": "Delivered by the seller"})
+        check(status == 201, f"seeding a product -> {status}: {product}")
+        product_id = product["id"]
+        status, _, _ = http("POST", f"/api/v1/admin/catalog/products/{product_id}/variants",
+                            token=state["admin_token"],
+                            body={"label": "200 g", "sku": f"E2E-{uuid.uuid4().hex[:8]}",
+                                  "price": "450.00", "minOrderQuantity": 1, "maxOrderQuantity": 10})
+        check(status == 200, f"seeding a variant -> {status}")
+        status, _, _ = http("POST", f"/api/v1/admin/catalog/products/{product_id}/publish",
+                            token=state["admin_token"])
+        check(status == 200, f"publishing the seeded product -> {status}")
+
     def quote():
+        # A fresh stack covers no PIN codes, so the address added above would not be serviceable.
+        # Cover it through the seller API before quoting, the way the seller configures delivery —
+        # but only when it is not covered already, so a pre-seeded stack needs no seller account.
+        status, probe, _ = http("GET", "/api/v1/serviceability/560038")
+        check(status == 200, f"probing the PIN -> {status}: {probe}")
+        if not probe.get("serviceable"):
+            require_admin()
+            status, _, _ = http("POST", "/api/v1/admin/fulfilment/serviceable-areas",
+                                token=state["admin_token"],
+                                body={"pincodePrefix": "560038", "areaName": "Indiranagar",
+                                      "deliveryChargeMinorUnits": 4900, "active": True})
+            check(status in (200, 201, 409), f"covering the PIN -> {status}")
         status, body, _ = http("POST", "/api/v1/carts/me/lines", token=state["token"],
                                body={"variantId": state["variant_id"], "quantity": 2})
         check(status == 200, f"expected 200, got {status}: {body}")
@@ -428,12 +483,6 @@ def main() -> int:
         SKIPPED.append("seller stages: set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD")
         print("  SKIP  seller stages: set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD")
         return _report()
-
-    def admin_login():
-        status, body, _ = http("POST", "/api/v1/auth/admin/login",
-                               body={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
-        check(status == 200, f"expected 200, got {status}: {body}")
-        state["admin_token"] = body["tokens"]["accessToken"]
 
     def customer_refused_at_kitchen():
         status, _, _ = http("GET", "/api/v1/admin/fulfilment/production/jobs",

@@ -79,6 +79,19 @@ service end (proven meaningful: it returns `401` and fails when the fulfilment `
 emptied) and `FulfilmentJourneyIT.anonymousCannotReachAdmin` proves the administrative kitchen stayed
 closed. `fulfilment-app` moves 28 → 30 tests; the cumulative total moves 1260 → **1262**.
 
+**End-to-end harness hardened and wired into CI (Phase 11.3).** The same harness that found the
+serviceability defect assumed a catalogue and a serviceable PIN code already existed, so it only ran
+against a warm, hand-seeded stack. On a genuinely fresh volume — which is exactly what CI starts from
+— the catalogue is empty and no PIN code is covered, so the journey stopped at the first checkout
+step. The harness now seeds a published product and covers the delivery PIN through the seller API
+when it finds the stack empty, using a run-stamped product name so a rerun against a partly-populated
+volume cannot collide with a leftover draft. It was then proven against a fresh `down -v` → `up`
+cycle: **33 steps, 0 failures, 0 skipped**. A new `.github/workflows/e2e.yml` boots the compose stack,
+waits for every service to report healthy (not only the gateway, because the journey drives the
+services the gateway proxies to), runs the harness, dumps the service logs on failure and tears the
+stack down. This is the check that exercises every service together; the per-service `*IT` suites
+still prove each seam in isolation.
+
 ---
 
 ## Distributed consistency review — the order↔payment saga
@@ -546,7 +559,7 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 |---|---|---|
 | 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (945 green across every module) |
 | 11.2 | Integration tests (Testcontainers) | IN PROGRESS (288 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
-| 11.3 | End-to-end workflows | IN PROGRESS — `scripts/e2e-journey.py` drives the whole customer→seller journey against a running stack through the gateway (register → email/mobile OTP → sign-in → address → catalogue → serviceability → checkout → verified capture → kitchen job → preparation → delivery → notification fan-out → invoice → admin dashboard/export). It is a smoke harness, not a substitute for the per-service `*IT` suites; the next step is a CI job that boots the compose stack and runs it. |
+| 11.3 | End-to-end workflows | DONE — `scripts/e2e-journey.py` drives the whole customer→seller journey against a running stack through the gateway (register → email/mobile OTP → sign-in → address → catalogue → serviceability → checkout → verified capture → kitchen job → preparation → delivery → notification fan-out → invoice → admin dashboard/export). It self-seeds the catalogue and a serviceable PIN code through the seller API when the stack is empty, so it runs against a fresh volume (which is what CI starts from) with no manual setup, and it is wired into CI by `.github/workflows/e2e.yml`, which boots the compose stack and runs it on every relevant push. It is a smoke harness, not a substitute for the per-service `*IT` suites. |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
 | 11.6 | Data privacy / export test | DONE — `AdminExportApiIT` proves the customer export masks the email and mobile (the raw values never appear in the file), the export needs `customer:export` beyond `report:read`, a customer token is refused, the download is `no-store` and the act is audited; `CsvXlsxExportWriterTest` proves a formula-injection cell is neutralised |
@@ -657,7 +670,7 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 |---|---|---|
 | 14.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
 | 14.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
-| 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, and gitleaks + OWASP dependency-check + Trivy. No workflow pushes to a registry yet (none is configured). |
+| 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security,e2e}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, gitleaks + OWASP dependency-check + Trivy, and an end-to-end job that boots the compose stack and runs `scripts/e2e-journey.py` against it. No workflow pushes to a registry yet (none is configured). |
 | 14.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
 | 14.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
 | 14.6 | Centralized logging | DONE (infra) — structured JSON on stdout; Loki + Promtail under the `observability` profile. |

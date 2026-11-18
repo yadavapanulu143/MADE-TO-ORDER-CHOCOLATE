@@ -7,6 +7,7 @@ import com.choco.core.error.UnauthenticatedException;
 import com.choco.core.port.Clock;
 import com.choco.core.port.IdGenerator;
 import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.TokenRevocationRegistry;
 import com.choco.core.port.TransactionRunner;
 import com.choco.identity.application.command.AdminLoginCommand;
 import com.choco.identity.application.dto.AdminAuthenticationResult;
@@ -47,6 +48,7 @@ public class AdminAuthenticationService {
     private final AdminRefreshTokenRepository refreshTokenRepository;
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
+    private final TokenRevocationRegistry revocationRegistry;
     private final AuditLogPort auditLog;
     private final AbuseGuard abuseGuard;
     private final TransactionRunner transactionRunner;
@@ -57,6 +59,7 @@ public class AdminAuthenticationService {
                                       AdminRefreshTokenRepository refreshTokenRepository,
                                       PasswordHasher passwordHasher,
                                       TokenService tokenService,
+                                      TokenRevocationRegistry revocationRegistry,
                                       AuditLogPort auditLog,
                                       AbuseGuard abuseGuard,
                                       TransactionRunner transactionRunner,
@@ -66,6 +69,7 @@ public class AdminAuthenticationService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
+        this.revocationRegistry = revocationRegistry;
         this.auditLog = auditLog;
         this.abuseGuard = abuseGuard;
         this.transactionRunner = transactionRunner;
@@ -138,6 +142,8 @@ public class AdminAuthenticationService {
 
         if (!stored.isActive(now)) {
             refreshTokenRepository.revokeAllForAdmin(stored.adminId(), now);
+            revocationRegistry.revokeSubjectIssuedBefore(stored.adminId(), now,
+                    now.plus(tokenService.accessTokenTtl()));
             auditLog.record("ADMIN", stored.adminId().toString(), "ADMIN_REFRESH_REPLAY_DETECTED",
                     "ADMIN_REFRESH_TOKEN", stored.id().toString(), "FAILURE", "REVOKED_TOKEN_REUSED", null);
             throw new UnauthenticatedException(ErrorCode.UNAUTHENTICATED,
@@ -150,6 +156,7 @@ public class AdminAuthenticationService {
         admin.assertUsable(now);
 
         refreshTokenRepository.revoke(stored.id(), now);
+        revokeSession(stored.id().toString(), now);
         TokenPair tokens = issueTokens(admin, now);
 
         return new AdminAuthenticationResult(toView(admin), tokens);
@@ -164,6 +171,9 @@ public class AdminAuthenticationService {
         refreshTokenRepository.findByHash(tokenService.hashRefreshToken(refreshTokenValue))
                 .ifPresent(stored -> {
                     refreshTokenRepository.revoke(stored.id(), now);
+                    // Retire the access token too, or a logged-out administrator keeps a working
+                    // credential for the rest of its lifetime.
+                    revokeSession(stored.id().toString(), now);
                     auditLog.record("ADMIN", stored.adminId().toString(), "ADMIN_LOGOUT",
                             "ADMIN_REFRESH_TOKEN", stored.id().toString(), "SUCCESS", null, null);
                 });
@@ -171,7 +181,10 @@ public class AdminAuthenticationService {
 
     /** Revokes every session for an administrator, used after a password change. */
     public int revokeAllSessions(UUID adminId) {
-        return refreshTokenRepository.revokeAllForAdmin(adminId, clock.now());
+        Instant now = clock.now();
+        int revoked = refreshTokenRepository.revokeAllForAdmin(adminId, now);
+        revocationRegistry.revokeSubjectIssuedBefore(adminId, now, now.plus(tokenService.accessTokenTtl()));
+        return revoked;
     }
 
     static AdminView toView(AdminAccount admin) {
@@ -191,13 +204,21 @@ public class AdminAuthenticationService {
                 false,
                 AdminPermissions.forRole(admin.role()));
 
-        IssuedToken accessToken = tokenService.issueAccessToken(user, now);
+        // The session id is the refresh-token row id and becomes the access token's jti, so revoking
+        // the session on logout invalidates the access token as well as the refresh token.
+        UUID sessionId = idGenerator.nextId();
+        IssuedToken accessToken = tokenService.issueAccessToken(user, sessionId.toString(), now);
         String refreshValue = tokenService.generateRefreshTokenValue();
         Instant refreshExpiry = now.plus(REFRESH_TOKEN_TTL);
-        refreshTokenRepository.store(idGenerator.nextId(), admin.id(),
+        refreshTokenRepository.store(sessionId, admin.id(),
                 tokenService.hashRefreshToken(refreshValue), refreshExpiry, now);
 
         return TokenPair.bearer(accessToken.value(), refreshValue, accessToken.expiresAt(), refreshExpiry);
+    }
+
+    /** Retires a session's access token when its refresh token is revoked. */
+    private void revokeSession(String sessionId, Instant now) {
+        revocationRegistry.revokeSession(sessionId, now.plus(tokenService.accessTokenTtl()));
     }
 
     private UnauthenticatedException invalidCredentials() {

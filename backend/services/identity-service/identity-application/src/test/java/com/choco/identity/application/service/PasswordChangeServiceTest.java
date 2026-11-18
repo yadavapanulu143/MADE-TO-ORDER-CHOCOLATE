@@ -45,6 +45,34 @@ class PasswordChangeServiceTest {
     private static final String CURRENT = "current horse battery";
     private static final String NEW = "brand new passphrase 42";
 
+    /**
+     * Minimal TokenService. Password change only needs session revocation, which the registry supplies;
+     * nothing here is ever called on a successful change path that mints a token.
+     */
+    private static final com.choco.identity.application.port.TokenService NOOP_TOKEN_SERVICE =
+            new com.choco.identity.application.port.TokenService() {
+                @Override
+                public com.choco.identity.application.port.IssuedToken issueAccessToken(
+                        com.choco.security.principal.AuthenticatedUser user, String sessionId, Instant now) {
+                    return new com.choco.identity.application.port.IssuedToken("access", now.plusSeconds(900));
+                }
+
+                @Override
+                public String generateRefreshTokenValue() {
+                    return "refresh-" + UUID.randomUUID();
+                }
+
+                @Override
+                public String hashRefreshToken(String tokenValue) {
+                    return "h:" + tokenValue;
+                }
+
+                @Override
+                public java.time.Duration accessTokenTtl() {
+                    return java.time.Duration.ofMinutes(15);
+                }
+            };
+
     private InMemoryCustomerRepository customers;
     private InMemoryRefreshTokenRepository refreshTokens;
     private List<String> notified;
@@ -116,7 +144,8 @@ class PasswordChangeServiceTest {
                 auditRecords.add(new String[] {action, outcome, detail});
 
         AuthenticationService authenticationService = new AuthenticationService(customers, refreshTokens,
-                new TestHasher(), null, auditLog, TestAbuseGuard.create(),
+                new TestHasher(), NOOP_TOKEN_SERVICE, new Fakes.InMemoryTokenRevocationRegistry(), auditLog,
+                TestAbuseGuard.create(),
                 new SnapshottingTransactionRunner(customers, new InMemoryOtpChallengeRepository()),
                 new Fakes.SequentialIdGenerator(), new Fakes.FixedClock(NOW));
 
@@ -304,7 +333,7 @@ class PasswordChangeServiceTest {
                     2, java.time.Duration.ofMinutes(15),
                     10, java.time.Duration.ofHours(1)));
             AuthenticationService auth = new AuthenticationService(customers, refreshTokens,
-                    new TestHasher(), null, NO_AUDIT, strict,
+                    new TestHasher(), NOOP_TOKEN_SERVICE, new Fakes.InMemoryTokenRevocationRegistry(), NO_AUDIT, strict,
                     new SnapshottingTransactionRunner(customers, new InMemoryOtpChallengeRepository()),
                     new Fakes.SequentialIdGenerator(), new Fakes.FixedClock(NOW));
             PasswordChangeService limited = new PasswordChangeService(customers, new TestHasher(),

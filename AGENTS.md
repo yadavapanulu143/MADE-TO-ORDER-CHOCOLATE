@@ -357,6 +357,31 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     gateway route and the public-path list are separate: `/api/v1/admin/customers/**` is routed at the
     edge but is deliberately never public, and `RoutingIT` proves both halves.
 
+44. **Revoking a refresh token does not revoke the access token — nothing does, unless you make it.**
+    A bearer access token is self-contained: once signed it is valid until it expires, so revoking the
+    refresh-token row on logout stopped the session being *renewed* while the access token already in
+    the client's hands kept working for the rest of its 15 minutes. For an administrator that token
+    authorises refunds, catalogue edits and customer exports, so "logged out" was a lie. The fix names
+    the session in the token (`jti` = refresh-token row id) and checks a revocation list in the
+    decoder. Two shapes are needed because two security events differ: a **session** revocation
+    (logout, rotation, replay) is presence-based, and a **subject cutoff** (password change/reset) is
+    time-bounded so a fresh sign-in after the change still works. Three rules make it safe:
+    - The check lives in the shared `JwtDecoder` (`common-security`), not only at the gateway, so a
+      service enforces it when called directly; every service that depends on `common-redis` gets the
+      registry and therefore the wrapper automatically.
+    - It **fails closed**: if the store cannot be consulted the decoder refuses the token. Answering
+      "not revoked" when the answer is unknown re-enables every session that was ever logged out.
+    - A token with no `jti`, subject or issue time is refused rather than trusted — the identity
+      service always sets them, so their absence means the token did not come from that path.
+    Tests that mint tokens by hand (every service's `Abstract*IntegrationTest`, and the gateway's)
+    must set a `jti`, or the decoder rejects them; that is why each one now calls `.id(...)`.
+45. **A revocation list keyed on individual access tokens cannot retire a session.** Keying on the
+    token would leave every *other* access token the session issued (a refresh in another tab, a token
+    minted a moment earlier) valid. Key on the **session id** so revoking the session retires all of
+    them at once; the token names it as `jti`. `RedisTokenRevocationRegistry` stores a presence key for
+    a session and a cutoff value for a subject, each with a TTL equal to the access-token lifetime, so
+    the store self-expires and never grows with the user count.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:
@@ -604,8 +629,18 @@ simultaneous payment starts) and `FulfilmentJourneyIT` (idempotent consumption o
 outbox atomicity and publication by `OutboxRelayIT`; duplicate webhook and verify idempotency by
 `PaymentJourneyIT`; provider-failure isolation by `NotificationJourneyIT`; read-model idempotency and
 the projection's transaction boundary by `ReportingJourneyIT` (a redelivered event leaves one row, a
-refund request and its processing are one row). Backups and recovery are documented with deployment
-(Phase 14) and are not yet verified end to end.
+refund request and its processing are one row). Token revocation — the session/access-token
+consistency boundary — is proven by `RevocationAwareJwtDecoderTest` (unit) and
+`RedisTokenRevocationRegistryIT` (real Redis: presence session key, time-bounded subject cutoff, a
+later cutoff superseding an earlier one, an expired window writing nothing). Backups and recovery are
+documented with deployment (Phase 14) and are not yet verified end to end.
+
+**Known limitation.** Revocation is *eventual across services only in the sense that every service
+reads the same Redis*: there is no per-request round trip to the identity service, so a service that
+cannot reach Redis refuses the token (fail-closed) rather than falling back to signature-only. That is
+the intended trade-off — an outage denies access instead of silently accepting revoked sessions — but
+it does make Redis a hard dependency of the authenticated request path, which is recorded as a
+durability/availability assumption to confirm with deployment (Phase 14).
 
 ## Security review
 
@@ -613,31 +648,51 @@ refund request and its processing are one row). Backups and recovery are documen
 fixes, the remaining risks and the maintenance procedure. It is a living document and is updated as
 each module lands and as the deployment configuration is built.
 
+## Access-token revocation
+
+The identity service mints access tokens with the session id as their `jti` (the refresh-token row
+id). Every service that depends on `common-redis` gets a `TokenRevocationRegistry` bean, and
+`common-security`'s `jwtDecoder` bean wraps the Nimbus decoder in `RevocationAwareJwtDecoder` when one
+is present, so a revoked token is refused at the service even when it is called directly rather than
+through the gateway.
+
+- **Revoked on:** logout, refresh-token rotation, replay detection (session scope) and password change
+  or reset (subject scope, "no token issued before this moment").
+- **Store:** Redis. `revoked:session:<id>` is a presence key; `revoked:subject:<id>` holds a cutoff
+  epoch-millis. Each entry carries a TTL equal to the access-token lifetime, so the list self-expires.
+- **Fail-closed:** if Redis cannot be reached, the decoder refuses the token. A token with no `jti`,
+  subject or issue time is refused.
+- **Not stored:** the revocation list holds identifiers and a cutoff, never a token — a copy of it
+  yields no usable credential.
+
+A test that mints a token by hand must set `jti` (`.id(...)` on `JwtClaimsSet.builder()`), or the
+decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway base do this.
+
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1212 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1233 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
 |---|---|
 | common-core | 40 |
 | common-web | 7 |
-| common-security | 23 |
+| common-security | 29 |
 | common-events | 6 |
-| common-redis | 4 (integration, real Redis) |
+| common-redis | 9 (integration, real Redis: rate limiter + token revocation) |
 | identity-domain | 56 |
-| identity-application | 145 |
+| identity-application | 150 |
 | identity-adapters-out | 6 |
 | identity-adapters-in | 6 |
-| identity-app | 46 (6 unit + 40 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
+| identity-app | 48 (6 unit + 42 integration: real PostgreSQL, Redis, RabbitMQ, SMTP) |
 | catalog-domain | 19 |
 | catalog-application | 27 |
 | catalog-app | 30 (4 unit + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
 | order-domain | 117 |
-| order-application | 76 |
+| order-application | 78 |
 | order-adapters-out | 14 (real HTTP server) |
 | order-adapters-in | 9 |
-| order-app | 78 (4 architecture + 74 integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
+| order-app | 79 (4 architecture + 75 integration: real PostgreSQL, Redis, RabbitMQ, in-process downstream stub) |
 | payment-domain | 40 |
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |

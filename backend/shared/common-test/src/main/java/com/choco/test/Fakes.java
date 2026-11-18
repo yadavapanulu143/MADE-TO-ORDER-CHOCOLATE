@@ -133,4 +133,41 @@ public final class Fakes {
             counts.remove(key);
         }
     }
+
+    /**
+     * In-memory revocation registry with the same semantics as the Redis implementation.
+     *
+     * <p>Sessions are a set, subjects map to a cutoff. Expiry is not simulated — a test that cares
+     * about a record expiring uses a real Redis, where the TTL is the server's job.
+     */
+    public static final class InMemoryTokenRevocationRegistry
+            implements com.choco.core.port.TokenRevocationRegistry {
+
+        private final java.util.Set<String> revokedSessions = new java.util.concurrent.ConcurrentHashMap<>().newKeySet();
+        private final java.util.Map<UUID, Instant> subjectCutoffs = new java.util.concurrent.ConcurrentHashMap<>();
+
+        @Override
+        public void revokeSession(String sessionId, Instant until) {
+            revokedSessions.add(sessionId);
+        }
+
+        @Override
+        public void revokeSubjectIssuedBefore(UUID subject, Instant cutoff, Instant until) {
+            subjectCutoffs.merge(subject, cutoff,
+                    (existing, replacement) -> replacement.isAfter(existing) ? replacement : existing);
+        }
+
+        @Override
+        public boolean isRevoked(String sessionId, UUID subject, Instant issuedAt) {
+            if (revokedSessions.contains(sessionId)) {
+                return true;
+            }
+            Instant cutoff = subjectCutoffs.get(subject);
+            return cutoff != null && issuedAt.isBefore(cutoff);
+        }
+
+        public boolean isSessionRevoked(String sessionId) {
+            return revokedSessions.contains(sessionId);
+        }
+    }
 }

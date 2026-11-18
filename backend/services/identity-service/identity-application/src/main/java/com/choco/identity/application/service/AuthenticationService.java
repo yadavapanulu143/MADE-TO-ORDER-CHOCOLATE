@@ -17,6 +17,7 @@ import com.choco.identity.domain.customer.Customer;
 import com.choco.identity.domain.customer.VerificationChannel;
 import com.choco.identity.domain.port.CustomerRepository;
 import com.choco.core.port.PasswordHasher;
+import com.choco.core.port.TokenRevocationRegistry;
 import com.choco.core.port.TransactionRunner;
 import com.choco.security.principal.AuthenticatedUser;
 import com.choco.security.principal.Roles;
@@ -46,6 +47,7 @@ public class AuthenticationService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
+    private final TokenRevocationRegistry revocationRegistry;
     private final AuditLogPort auditLog;
     private final AbuseGuard abuseGuard;
     private final TransactionRunner transactionRunner;
@@ -56,6 +58,7 @@ public class AuthenticationService {
                                  RefreshTokenRepository refreshTokenRepository,
                                  PasswordHasher passwordHasher,
                                  TokenService tokenService,
+                                 TokenRevocationRegistry revocationRegistry,
                                  AuditLogPort auditLog,
                                  AbuseGuard abuseGuard,
                                  TransactionRunner transactionRunner,
@@ -65,6 +68,7 @@ public class AuthenticationService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
+        this.revocationRegistry = revocationRegistry;
         this.auditLog = auditLog;
         this.abuseGuard = abuseGuard;
         this.transactionRunner = transactionRunner;
@@ -146,8 +150,12 @@ public class AuthenticationService {
                 });
 
         if (!stored.isActive(now)) {
-            // A revoked token being presented again suggests replay; revoke the whole family.
+            // A revoked token being presented again suggests replay; revoke the whole family. The
+            // access tokens of every session in the family are retired too, since each one named its
+            // session id as its jti and the family revocation is what makes the replay harmless.
             refreshTokenRepository.revokeAllForCustomer(stored.customerId(), now);
+            revocationRegistry.revokeSubjectIssuedBefore(stored.customerId(), now,
+                    now.plus(tokenService.accessTokenTtl()));
             auditLog.record("CUSTOMER", stored.customerId().toString(), "REFRESH_REPLAY_DETECTED",
                     "REFRESH_TOKEN", stored.id().toString(), "FAILURE", "REVOKED_TOKEN_REUSED", null);
             throw new UnauthenticatedException(ErrorCode.UNAUTHENTICATED,
@@ -159,7 +167,11 @@ public class AuthenticationService {
                         "Your session has expired. Please sign in again."));
         customer.assertUsable(now);
 
+        // Rotation retires the session that presented the old refresh token: its access token is as
+        // stale as the refresh token it came with, so a client holding the old pair cannot keep using
+        // the old access token after it has been handed a new pair.
         refreshTokenRepository.revoke(stored.id(), now);
+        revokeSession(stored.id().toString(), now);
         TokenPair tokens = issueTokens(customer, now);
 
         return new AuthenticationResult(CustomerViews.from(customer), tokens);
@@ -174,14 +186,28 @@ public class AuthenticationService {
         refreshTokenRepository.findByHash(tokenService.hashRefreshToken(refreshTokenValue))
                 .ifPresent(stored -> {
                     refreshTokenRepository.revoke(stored.id(), now);
+                    // The point of logout is that the credential stops working now. Revoking only the
+                    // refresh token would leave the access token valid for the rest of its lifetime,
+                    // which is exactly the gap this closes.
+                    revokeSession(stored.id().toString(), now);
                     auditLog.record("CUSTOMER", stored.customerId().toString(), "LOGOUT", "REFRESH_TOKEN",
                             stored.id().toString(), "SUCCESS", null, null);
                 });
     }
 
-    /** Revokes every session for a customer, used after a password change or reset. */
+    /**
+     * Revokes every session for a customer, used after a password change or reset.
+     *
+     * <p>Retires both the refresh tokens and any access token issued before the change, so a session an
+     * attacker already holds dies with the new password rather than surviving until its access token
+     * expires. A token minted by a sign-in <em>after</em> the change is issued later than the cutoff and
+     * is unaffected, so the account can sign in again immediately.
+     */
     public int revokeAllSessions(UUID customerId) {
-        return refreshTokenRepository.revokeAllForCustomer(customerId, clock.now());
+        Instant now = clock.now();
+        int revoked = refreshTokenRepository.revokeAllForCustomer(customerId, now);
+        revocationRegistry.revokeSubjectIssuedBefore(customerId, now, now.plus(tokenService.accessTokenTtl()));
+        return revoked;
     }
 
     private TokenPair issueTokens(Customer customer, Instant now) {
@@ -193,13 +219,29 @@ public class AuthenticationService {
                 customer.isVerified(VerificationChannel.MOBILE),
                 java.util.Set.of());
 
-        IssuedToken accessToken = tokenService.issueAccessToken(user, now);
+        // The session id is the refresh-token row id, decided before the token is minted so the access
+        // token can name it as its jti. That is what ties the pair together: revoking the session later
+        // (on logout, rotation or replay) invalidates the access token too.
+        UUID sessionId = idGenerator.nextId();
+        IssuedToken accessToken = tokenService.issueAccessToken(user, sessionId.toString(), now);
         String refreshValue = tokenService.generateRefreshTokenValue();
         Instant refreshExpiry = now.plus(REFRESH_TOKEN_TTL);
-        refreshTokenRepository.store(idGenerator.nextId(), customer.id(),
+        refreshTokenRepository.store(sessionId, customer.id(),
                 tokenService.hashRefreshToken(refreshValue), refreshExpiry, now);
 
         return TokenPair.bearer(accessToken.value(), refreshValue, accessToken.expiresAt(), refreshExpiry);
+    }
+
+    /**
+     * Retires one session's access token the moment its refresh token is revoked.
+     *
+     * <p>The retention window is the access-token lifetime: after it elapses no token of this session
+     * could still be presented, so the record expires on its own. A store failure is allowed to
+     * propagate rather than swallowed: a logout that reported success while the access token still
+     * worked would be worse than a visible error, and the caller can retry.
+     */
+    private void revokeSession(String sessionId, Instant now) {
+        revocationRegistry.revokeSession(sessionId, now.plus(tokenService.accessTokenTtl()));
     }
 
     private Optional<Customer> findByEmailOrMobile(String identifier) {

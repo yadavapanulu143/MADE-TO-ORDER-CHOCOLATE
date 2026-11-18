@@ -43,6 +43,8 @@ class AdminAuthenticationServiceTest {
     private InMemoryAdminRepository admins;
     private InMemoryAdminRefreshTokenRepository refreshTokens;
     private Fakes.FixedClock clock;
+    private Fakes.InMemoryTokenRevocationRegistry revocationRegistry;
+    private String lastSessionId;
     private AdminAuthenticationService service;
     private AdminAccount admin;
     private AuthenticatedUser lastIssuedFor;
@@ -76,8 +78,9 @@ class AdminAuthenticationServiceTest {
 
         var tokenService = new TokenService() {
             @Override
-            public IssuedToken issueAccessToken(AuthenticatedUser user, Instant now) {
+            public IssuedToken issueAccessToken(AuthenticatedUser user, String sessionId, Instant now) {
                 lastIssuedFor = user;
+                lastSessionId = sessionId;
                 return new IssuedToken("access-" + user.userId(), now.plusSeconds(900));
             }
 
@@ -90,12 +93,18 @@ class AdminAuthenticationServiceTest {
             public String hashRefreshToken(String tokenValue) {
                 return "h:" + tokenValue;
             }
+
+            @Override
+            public java.time.Duration accessTokenTtl() {
+                return java.time.Duration.ofMinutes(15);
+            }
         };
         AuditLogPort audit = (actorType, actorId, action, targetType, targetId, outcome, detail, correlationId) -> {
         };
 
+        revocationRegistry = new Fakes.InMemoryTokenRevocationRegistry();
         service = new AdminAuthenticationService(admins, refreshTokens, new TestHasher(), tokenService,
-                audit, TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(),
+                revocationRegistry, audit, TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(),
                 new Fakes.SequentialIdGenerator(), clock);
     }
 
@@ -215,6 +224,32 @@ class AdminAuthenticationServiceTest {
         service.logout(refresh);
 
         assertThat(refreshTokens.findByHash("h:" + refresh).orElseThrow().revokedAt()).isNotNull();
+    }
+
+    @Test
+    void logout_revokes_the_access_token_of_that_session() {
+        // The administrator's access token is the credential that can refund and export; logout must
+        // retire it, not only the refresh token.
+        var first = service.login(login("owner@choco.example", PASSWORD));
+        String sessionId = refreshTokens.findByHash("h:" + first.tokens().refreshToken())
+                .orElseThrow().id().toString();
+
+        assertThat(revocationRegistry.isRevoked(sessionId, admin.id(), clock.now())).isFalse();
+
+        service.logout(first.tokens().refreshToken());
+
+        assertThat(revocationRegistry.isRevoked(sessionId, admin.id(), clock.now())).isTrue();
+    }
+
+    @Test
+    void refreshing_revokes_the_previous_access_token() {
+        var first = service.login(login("owner@choco.example", PASSWORD));
+        String sessionId = refreshTokens.findByHash("h:" + first.tokens().refreshToken())
+                .orElseThrow().id().toString();
+
+        service.refresh(first.tokens().refreshToken());
+
+        assertThat(revocationRegistry.isRevoked(sessionId, admin.id(), clock.now())).isTrue();
     }
 
     @Test

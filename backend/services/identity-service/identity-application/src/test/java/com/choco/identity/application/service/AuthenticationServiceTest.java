@@ -58,6 +58,7 @@ class AuthenticationServiceTest {
     }
 
     private TestHasher hasher;
+    private Fakes.InMemoryTokenRevocationRegistry revocationRegistry;
 
     @BeforeEach
     void setUp() {
@@ -75,7 +76,7 @@ class AuthenticationServiceTest {
 
         var tokenService = new TokenService() {
             @Override
-            public IssuedToken issueAccessToken(AuthenticatedUser user, Instant now) {
+            public IssuedToken issueAccessToken(AuthenticatedUser user, String sessionId, Instant now) {
                 return new IssuedToken("access-" + user.userId(), now.plusSeconds(900));
             }
 
@@ -88,6 +89,11 @@ class AuthenticationServiceTest {
             public String hashRefreshToken(String tokenValue) {
                 return "h:" + tokenValue;
             }
+
+            @Override
+            public java.time.Duration accessTokenTtl() {
+                return java.time.Duration.ofMinutes(15);
+            }
         };
         var audit = new com.choco.identity.application.port.AuditLogPort() {
             @Override
@@ -96,8 +102,10 @@ class AuthenticationServiceTest {
             }
         };
 
-        service = new AuthenticationService(customers, refreshTokens, hasher, tokenService, audit,
-                TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(), new Fakes.SequentialIdGenerator(), clock);
+        revocationRegistry = new Fakes.InMemoryTokenRevocationRegistry();
+        service = new AuthenticationService(customers, refreshTokens, hasher, tokenService, revocationRegistry,
+                audit, TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(),
+                new Fakes.SequentialIdGenerator(), clock);
     }
 
     private LoginCommand login(String identifier, String password) {
@@ -232,6 +240,55 @@ class AuthenticationServiceTest {
         // A second logout with the same value must not fail.
         service.logout(tokens.refreshToken());
         service.logout(null);
+    }
+
+    @Test
+    void logout_revokes_the_access_token_of_that_session() {
+        // The whole point of the fix: a valid access token must stop working the moment its session is
+        // logged out. Only the refresh token being revoked would leave it valid for its full lifetime.
+        TokenPair tokens = service.login(login("asha@example.com", PASSWORD)).tokens();
+        String sessionId = sessionIdOf(tokens);
+
+        assertThat(revocationRegistry.isRevoked(sessionId, customer.id(), clock.now()))
+                .as("a live session is not revoked")
+                .isFalse();
+
+        service.logout(tokens.refreshToken());
+
+        assertThat(revocationRegistry.isRevoked(sessionId, customer.id(), clock.now()))
+                .as("logging out must revoke the session's access token")
+                .isTrue();
+    }
+
+    @Test
+    void refreshing_rotates_and_revokes_the_previous_access_token() {
+        TokenPair first = service.login(login("asha@example.com", PASSWORD)).tokens();
+        String firstSession = sessionIdOf(first);
+
+        service.refresh(first.refreshToken());
+
+        assertThat(revocationRegistry.isRevoked(firstSession, customer.id(), clock.now()))
+                .as("the access token paired with the rotated refresh token must be retired")
+                .isTrue();
+    }
+
+    @Test
+    void revoking_all_sessions_retires_every_access_token_issued_before() {
+        service.login(login("asha@example.com", PASSWORD)).tokens();
+        Instant beforeRevocation = clock.now();
+
+        service.revokeAllSessions(customer.id());
+
+        // A token issued before the password change is refused; one issued after it is accepted, so
+        // the account can sign in again immediately.
+        assertThat(revocationRegistry.isRevoked("any", customer.id(), beforeRevocation.minusSeconds(1))).isTrue();
+        assertThat(revocationRegistry.isRevoked("any", customer.id(), beforeRevocation.plusSeconds(1))).isFalse();
+    }
+
+    /** Recovers the session id the token pair was minted with, from the stored refresh-token rows. */
+    private String sessionIdOf(TokenPair tokens) {
+        String hash = "h:" + tokens.refreshToken();
+        return refreshTokens.findByHash(hash).orElseThrow().id().toString();
     }
 
     @Test

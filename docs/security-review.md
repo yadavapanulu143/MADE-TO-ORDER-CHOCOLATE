@@ -54,7 +54,19 @@ the IDOR control, and it is exercised by per-service isolation tests.
 
 **Tokens.** Access tokens expire in 15 minutes. Refresh tokens rotate on use; a reused (already
 rotated) refresh token is treated as replay, and the whole chain is revoked. Logout revokes the
-refresh token. Password reset tokens are single-use and time-bounded.
+refresh token.
+
+**Token revocation is enforced, not implied.** An access token names the session that issued it (the
+refresh-token row id) in its `jti`, and every service wraps its `JwtDecoder` in a
+`RevocationAwareJwtDecoder` that refuses a token whose session has been revoked — so logout, rotation
+and replay detection retire the *access* token too, not only the refresh token. Two scopes exist: a
+**session** (logout, refresh rotation, replay) and a **subject up to a cutoff** (password change or
+reset, which retires every token issued before the change while leaving a fresh sign-in working).
+The store is Redis (`revoked:session:*`, `revoked:subject:*`), read on every authenticated request,
+each entry carrying a TTL equal to the access-token lifetime so it self-expires. The decoder
+**fails closed**: if the store cannot be consulted it refuses the token rather than assuming it is
+live, and a token with no `jti` or subject is refused. Password reset tokens are single-use and
+time-bounded.
 
 ## 3. Secret-management rules
 
@@ -155,6 +167,7 @@ Severity uses the conventional scale (Critical / High / Medium / Low / Informati
 |---|---|---|---|---|
 | F-1 | High | **The gateway's public-path allow-list omitted `/api/v1/auth/admin/refresh` and `/api/v1/auth/admin/logout`.** The identity service serves both without a token (a refresh token is not an access token), but the edge required a bearer token for them, so an administrator's session could never be renewed or revoked through the gateway — every admin session died after 15 minutes and could not be logged out at the edge. | Added both paths to `GatewayProperties.publicPaths`, alongside the customer refresh/logout pair. | `GatewayPropertiesTest.opensAdminRefreshAndLogoutWithoutAnAccessToken` (unit) and `RoutingIT.adminRefreshAndLogoutReachIdentityWithoutAToken` (integration: both paths reach identity with no token) |
 | F-1b | Medium | **`/api/v1/admin/payments/**` was served by the payment service but never routed at the edge.** Every administrative payment call — the seller's counters and refund surface — 404'd through the gateway while working when the payment service was called directly. Availability, not confidentiality (the route is authenticated when present, and the downstream still enforces `payment:read`/`payment:write`), but the seller's dashboard could not reach it. | Added the admin payments prefix to the payment route in `RoutingConfiguration`. | `RoutingIT.adminPaymentsReachPaymentService` and `RoutingIT.adminPaymentsAreNotPublic` (integration: the route is proxied with a token and refused without one) |
+| F-1c | High | **Logout did not revoke the access token, only the refresh token.** A bearer access token is self-contained: revoking the refresh token stopped the session being *renewed*, but the access token already in the client's hands kept working for the rest of its 15-minute life — and for an administrator that token authorises refunds, catalogue edits and customer exports. Rotation and replay detection had the same gap. There was no mechanism anywhere to invalidate an unexpired token. | Access tokens now carry the session id as their `jti`; the identity service revokes the session on logout, on refresh rotation and on replay detection, and revokes the *subject up to a cutoff* on a password change or reset. Every service wraps its `JwtDecoder` in a `RevocationAwareJwtDecoder` that refuses a revoked token and **fails closed** when the store is unavailable; the store is Redis with a self-expiring TTL per entry. | `RevocationAwareJwtDecoderTest` (6 unit: live accepted, revoked session refused, subject cutoff refused, post-cutoff accepted, store failure fails closed, missing `jti` refused); `RedisTokenRevocationRegistryIT` (5 integration, real Redis: presence-based session, time-bounded subject cutoff, later cutoff wins, expired window ignored); `AuthenticationServiceTest` and `AdminAuthenticationServiceTest` assert logout and rotation retire the session's access token; `CustomerJourneyIT`/`AdminJourneyIT` exercise the path over real HTTP |
 
 ### Open — to address before deployment
 
@@ -171,7 +184,9 @@ Severity uses the conventional scale (Critical / High / Medium / Low / Informati
 ### Verified controls (no finding)
 
 Password hashing (Argon2id, OWASP parameters; BCrypt cost 15 fallback with transparent upgrade);
-RS256 token signing and issuer validation; refresh-token rotation and replay detection; rate limiting
+RS256 token signing and issuer validation; refresh-token rotation and replay detection; **access-token
+revocation on logout, rotation, replay and password change, enforced by every service's decoder and
+failing closed when the store is unavailable**; rate limiting
 on login, registration, OTP, password reset and password change, per identifier and per address, with
 identifiers hashed before they become Redis keys; OTP expiry, attempt and resend limits; ownership
 checks on customer data; admin/customer identity separation with no public admin sign-up; server-side

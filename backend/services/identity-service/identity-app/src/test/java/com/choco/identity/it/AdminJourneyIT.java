@@ -140,6 +140,26 @@ class AdminJourneyIT extends AbstractIdentityIntegrationTest {
     }
 
     @Test
+    @DisplayName("admin logout retires the access token, not only the refresh token")
+    void admin_logout_retires_the_access_token() {
+        // An administrator's access token authorises refunds, catalogue edits and customer exports, so
+        // a logout that left it working for its remaining 15 minutes would be a live privileged
+        // credential on a closed session. It must be refused on the next protected call.
+        JsonNode login = json(adminLogin(BOOTSTRAP_ADMIN_EMAIL, BOOTSTRAP_ADMIN_PASSWORD));
+        String accessToken = login.get("tokens").get("accessToken").asText();
+        String refreshToken = login.get("tokens").get("refreshToken").asText();
+
+        assertThat(get("/api/v1/admin/customers", accessToken).statusCode()).isEqualTo(200);
+
+        assertThat(post("/api/v1/auth/admin/logout",
+                jsonBody(Map.of("refreshToken", refreshToken))).statusCode()).isEqualTo(204);
+
+        assertThat(get("/api/v1/admin/customers", accessToken).statusCode())
+                .as("a logged-out administrator token must no longer be accepted")
+                .isEqualTo(401);
+    }
+
+    @Test
     @DisplayName("the admin login endpoint is rate limited independently of the customer endpoint")
     void admin_login_is_rate_limited_independently() {
         boolean limited = false;

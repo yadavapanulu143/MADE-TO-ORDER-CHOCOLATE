@@ -1,7 +1,9 @@
 package com.choco.redis.config;
 
 import com.choco.core.port.RateLimiter;
+import com.choco.core.port.TokenRevocationRegistry;
 import com.choco.redis.ratelimit.RedisRateLimiter;
+import com.choco.redis.revocation.RedisTokenRevocationRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -47,5 +49,20 @@ public class RedisAutoConfig {
     @ConditionalOnMissingBean
     public RateLimiter rateLimiter(StringRedisTemplate stringRedisTemplate) {
         return new RedisRateLimiter(stringRedisTemplate);
+    }
+
+    /**
+     * Access-token revocation list backed by Redis, shared across replicas.
+     *
+     * <p>The identity service writes to it on logout, rotation and replay; every service reads it on
+     * each authenticated request through the revocation-aware decoder. Redis is the right store for
+     * the same reason the rate limiter uses it: the answer must be the same on every replica, and it
+     * is read on a hot path where a database round trip would be a tax on every request. Entries carry
+     * a TTL equal to the revoked session's remaining life, so the store self-expires.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public TokenRevocationRegistry tokenRevocationRegistry(StringRedisTemplate stringRedisTemplate) {
+        return new RedisTokenRevocationRegistry(stringRedisTemplate);
     }
 }

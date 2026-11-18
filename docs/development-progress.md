@@ -3,10 +3,11 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1195 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1233 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
-dashboards and CSV/XLSX exports). Integration tests (`*IT`) run under the
+dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
+replay detection and password change). Integration tests (`*IT`) run under the
 `verify` phase via the failsafe plugin; unit tests (`*Test`) run under `test`.
 The identity service has full-stack integration tests that start real PostgreSQL, Redis and
 RabbitMQ containers plus a GreenMail SMTP sink, and drive the service over HTTP: Flyway/Hibernate
@@ -140,7 +141,7 @@ after the push, and both pushes succeeded on the first attempt.
 | 3.2 | Email OTP verification | DONE | `POST /api/v1/auth/customers/{id}/verifications?channel=EMAIL` |
 | 3.3 | Mobile OTP verification | DONE | Same endpoint, `channel=MOBILE`; `VerificationServiceTest` (10 tests) |
 | 3.4 | OTP expiry, resend limits, max attempts | DONE | Enforced in the `OtpChallenge` aggregate; `AbuseGuard` adds per-customer resend/verify budgets |
-| 3.5 | Login / logout | DONE | `AuthenticationServiceTest` (14 tests); refresh-token rotation with replay detection |
+| 3.5 | Login / logout | DONE | `AuthenticationServiceTest` (14 tests); refresh-token rotation with replay detection. Logout now also revokes the session's **access** token: the token names its session as `jti`, and every service's `RevocationAwareJwtDecoder` refuses a revoked session. `AdminAuthenticationServiceTest` proves the same for administrators |
 | 3.6 | Password reset | DONE | `PasswordResetServiceTest` (9 tests) |
 | 3.7 | Argon2id hashing (BCrypt-15 fallback) | DONE | `common-security`; 23 tests green |
 | 3.8 | Admin authentication | DONE | Separate `AdminAccount` aggregate and `admin_accounts` table (`V3__admin_accounts.sql`); `POST /api/v1/auth/admin/login`, `/refresh`, `/logout`; role (`ADMIN`/`SUPER_ADMIN`) read from the row, never from input; first admin seeded once from `choco.admin.bootstrap.*` (idempotent, refuses a weak password, never overwrites); admin rate limits use separate counters; `AdminAccountTest` (8) + `AdminAuthenticationServiceTest` (13) + `AdminProvisioningServiceTest` (5) + `AdminAuthControllerTest` (5) + `AbuseGuardTest` (+3); verified over HTTP (16 checks) including customer/admin boundary isolation |
@@ -527,8 +528,8 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (932 green across every module) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (280 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (945 green across every module) |
+| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (288 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
 | 11.3 | End-to-end workflows | TODO |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
@@ -677,22 +678,22 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 |---|---|---|---|
 | common-core | 40 | – | 40 |
 | common-web | 7 | – | 7 |
-| common-security | 23 | – | 23 |
+| common-security | 29 | – | 29 |
 | common-events | 6 | – | 6 |
-| common-redis | – | 4 | 4 |
+| common-redis | – | 9 | 9 |
 | identity-domain | 56 | – | 56 |
-| identity-application | 145 | – | 145 |
+| identity-application | 150 | – | 150 |
 | identity-adapters-out | 6 | – | 6 |
 | identity-adapters-in | 6 | – | 6 |
-| identity-app | 6 | 40 | 46 |
+| identity-app | 6 | 42 | 48 |
 | catalog-domain | 19 | – | 19 |
 | catalog-application | 27 | – | 27 |
 | catalog-app | 4 | 26 | 30 |
 | order-domain | 117 | – | 117 |
-| order-application | 76 | – | 76 |
+| order-application | 78 | – | 78 |
 | order-adapters-in | 9 | – | 9 |
 | order-adapters-out | 14 | – | 14 |
-| order-app | 4 | 74 | 78 |
+| order-app | 4 | 75 | 79 |
 | payment-domain | 40 | – | 40 |
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
@@ -708,7 +709,7 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **932** | **280** | **1212** |
+| **Total** | **945** | **288** | **1233** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -729,8 +730,8 @@ files undercounts and a naive per-file sum is not the total.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 7 | Flyway applied V1–V3; Hibernate `validate` matches the schema; DB-level unique, check and FK constraints reject bad rows |
-| CustomerJourneyIT | 14 | Register → verify email and mobile → sign in → profile/contact/addresses, refresh rotation and replay detection, logout, login rate limiting, ownership isolation |
-| AdminJourneyIT | 10 | Bootstrap administrator, admin token authority, no public admin sign-up, customer credentials and refresh tokens refused at admin endpoints, independent admin rate limiting |
+| CustomerJourneyIT | 15 | Register → verify email and mobile → sign in → profile/contact/addresses, refresh rotation and replay detection, logout (which now retires the **access** token, not only the refresh token), login rate limiting, ownership isolation |
+| AdminJourneyIT | 11 | Bootstrap administrator, admin token authority, no public admin sign-up, customer credentials and refresh tokens refused at admin endpoints, independent admin rate limiting, and admin logout retiring the **access** token |
 | OutboxRelayIT | 3 | A real registration publishes `customer.registered` to a bound RabbitMQ queue and marks the outbox row published |
 
 ### Catalog integration tests (`mvn verify`)

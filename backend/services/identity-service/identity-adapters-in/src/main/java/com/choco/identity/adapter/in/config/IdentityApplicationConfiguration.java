@@ -6,6 +6,7 @@ import com.choco.core.port.IdGenerator;
 import com.choco.core.port.PasswordHasher;
 import com.choco.core.port.PasswordPolicy;
 import com.choco.core.port.RateLimiter;
+import com.choco.core.port.TokenRevocationRegistry;
 import com.choco.core.port.TransactionRunner;
 import com.choco.identity.application.port.AccountNotificationPort;
 import com.choco.identity.application.port.AdminRefreshTokenRepository;
@@ -96,13 +97,14 @@ class IdentityApplicationConfiguration {
                                                 RefreshTokenRepository refreshTokenRepository,
                                                 PasswordHasher passwordHasher,
                                                 TokenService tokenService,
+                                                TokenRevocationRegistry revocationRegistry,
                                                 AuditLogPort auditLog,
                                                 AbuseGuard abuseGuard,
                                                 TransactionRunner transactionRunner,
                                                 IdGenerator idGenerator,
                                                 Clock clock) {
         return new AuthenticationService(customerRepository, refreshTokenRepository, passwordHasher,
-                tokenService, auditLog, abuseGuard, transactionRunner, idGenerator, clock);
+                tokenService, revocationRegistry, auditLog, abuseGuard, transactionRunner, idGenerator, clock);
     }
 
     @Bean
@@ -199,14 +201,15 @@ class IdentityApplicationConfiguration {
             AdminRefreshTokenRepository adminRefreshTokenRepository,
             PasswordHasher passwordHasher,
             TokenService tokenService,
+            TokenRevocationRegistry revocationRegistry,
             AuditLogPort auditLog,
             AbuseGuard abuseGuard,
             TransactionRunner transactionRunner,
             IdGenerator idGenerator,
             Clock clock) {
         return new com.choco.identity.application.service.AdminAuthenticationService(adminRepository,
-                adminRefreshTokenRepository, passwordHasher, tokenService, auditLog, abuseGuard,
-                transactionRunner, idGenerator, clock);
+                adminRefreshTokenRepository, passwordHasher, tokenService, revocationRegistry, auditLog,
+                abuseGuard, transactionRunner, idGenerator, clock);
     }
 
     @Bean

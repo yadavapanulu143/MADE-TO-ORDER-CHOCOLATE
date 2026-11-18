@@ -263,4 +263,26 @@ class CustomerJourneyIT extends AbstractIdentityIntegrationTest {
                 jsonBody(Map.of("refreshToken", refreshToken)));
         assertThat(afterLogout.statusCode()).isEqualTo(401);
     }
+
+    @Test
+    @DisplayName("logout retires the access token, not only the refresh token")
+    void logout_retires_the_access_token() {
+        // The whole point of the fix: an access token is valid until it expires, so revoking only the
+        // refresh token would leave the credential already in the client's hands working for the rest
+        // of its 15 minutes. A logged-out token must be refused on the very next protected request.
+        VerifiedCustomer customer = registerVerifiedCustomer("logout-access");
+        JsonNode login = loginResponse(customer);
+        String accessToken = login.get("tokens").get("accessToken").asText();
+        String refreshToken = login.get("tokens").get("refreshToken").asText();
+
+        // The token works before logout — otherwise the test would pass for the wrong reason.
+        assertThat(get("/api/v1/customers/me", accessToken).statusCode()).isEqualTo(200);
+
+        assertThat(post("/api/v1/auth/logout", jsonBody(Map.of("refreshToken", refreshToken))).statusCode())
+                .isEqualTo(204);
+
+        assertThat(get("/api/v1/customers/me", accessToken).statusCode())
+                .as("a logged-out access token must no longer be accepted")
+                .isEqualTo(401);
+    }
 }

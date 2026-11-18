@@ -103,7 +103,7 @@ class PasswordResetServiceTest {
 
         AuthenticationService authentication = new AuthenticationService(customers,
                 new InMemoryRefreshTokenRepository(), passwordHasher,
-                new NoopTokenService(), auditLog,
+                new NoopTokenService(), new Fakes.InMemoryTokenRevocationRegistry(), auditLog,
                 TestAbuseGuard.create(), new Fakes.DirectTransactionRunner(), new Fakes.SequentialIdGenerator(), clock);
         IdGenerator ids = new Fakes.SequentialIdGenerator();
 
@@ -234,7 +234,7 @@ class PasswordResetServiceTest {
     private static final class NoopTokenService implements com.choco.identity.application.port.TokenService {
         @Override
         public com.choco.identity.application.port.IssuedToken issueAccessToken(
-                com.choco.security.principal.AuthenticatedUser user, Instant now) {
+                com.choco.security.principal.AuthenticatedUser user, String sessionId, Instant now) {
             return new com.choco.identity.application.port.IssuedToken("access", now.plusSeconds(900));
         }
 
@@ -246,6 +246,11 @@ class PasswordResetServiceTest {
         @Override
         public String hashRefreshToken(String tokenValue) {
             return "sha256:" + tokenValue;
+        }
+
+        @Override
+        public java.time.Duration accessTokenTtl() {
+            return java.time.Duration.ofMinutes(15);
         }
     }
 }

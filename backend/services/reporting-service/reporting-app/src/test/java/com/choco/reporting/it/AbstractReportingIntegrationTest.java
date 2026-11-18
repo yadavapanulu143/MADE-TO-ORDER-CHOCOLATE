@@ -188,6 +188,7 @@ public abstract class AbstractReportingIntegrationTest {
     private String token(UUID subject, String email, String role, Set<String> permissions) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
+                .id(java.util.UUID.randomUUID().toString())
                 .subject(subject.toString())
                 .issuer("choco-identity")
                 .issuedAt(now)

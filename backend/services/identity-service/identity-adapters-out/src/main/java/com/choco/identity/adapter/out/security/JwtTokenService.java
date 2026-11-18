@@ -51,12 +51,13 @@ class JwtTokenService implements TokenService {
     }
 
     @Override
-    public IssuedToken issueAccessToken(AuthenticatedUser user, Instant now) {
+    public IssuedToken issueAccessToken(AuthenticatedUser user, String sessionId, Instant now) {
         Instant expiresAt = now.plus(accessTokenTtl);
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(issuer)
                 .issuedAt(now)
                 .expiresAt(expiresAt)
+                .id(sessionId)
                 .subject(user.userId().toString())
                 .claim("email", user.email())
                 .claim("role", user.role())
@@ -67,6 +68,11 @@ class JwtTokenService implements TokenService {
 
         String token = jwtEncoder.encode(JwtEncoderParameters.from(claims)).getTokenValue();
         return new IssuedToken(token, expiresAt);
+    }
+
+    @Override
+    public Duration accessTokenTtl() {
+        return accessTokenTtl;
     }
 
     @Override

@@ -1,9 +1,12 @@
 package com.choco.security.config;
 
+import com.choco.core.port.TokenRevocationRegistry;
+import com.choco.security.revocation.RevocationAwareJwtDecoder;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -127,16 +130,28 @@ public class SecurityAutoConfiguration {
      *
      * <p>Asymmetric keys (RS256) are used so that only the identity service holds the private key:
      * every other service can verify a token but none of them can mint one.
+     *
+     * <p>When a {@link TokenRevocationRegistry} is on the context — every service that depends on
+     * {@code common-redis} has one — the decoder is wrapped so a revoked session's token is refused
+     * even though its signature and expiry are still valid. Without that wrapper, logging out would
+     * revoke only the refresh token and leave the access token working for the rest of its lifetime,
+     * which for an administrator is a working credential on a supposedly closed session. The check is
+     * deliberately here, in the shared decoder, rather than only at the gateway: a service must still
+     * enforce the rule when a request reaches it directly, and the gateway is not the only enforcement
+     * point.
      */
     @Bean
     @ConditionalOnMissingBean
     public JwtDecoder jwtDecoder(@Value("${choco.security.jwk-set-uri}") String jwkSetUri,
-                                 @Value("${choco.security.issuer:choco-identity}") String issuer) {
+                                 @Value("${choco.security.issuer:choco-identity}") String issuer,
+                                 ObjectProvider<TokenRevocationRegistry> revocationRegistry) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
         OAuth2TokenValidator<Jwt> withIssuer =
                 new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefault(), new JwtIssuerValidator(issuer));
         decoder.setJwtValidator(withIssuer);
-        return decoder;
+
+        TokenRevocationRegistry registry = revocationRegistry.getIfAvailable();
+        return registry == null ? decoder : new RevocationAwareJwtDecoder(decoder, registry);
     }
 
     /**

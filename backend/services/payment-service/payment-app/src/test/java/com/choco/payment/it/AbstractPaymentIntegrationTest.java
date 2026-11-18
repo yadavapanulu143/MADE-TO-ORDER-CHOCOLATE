@@ -172,6 +172,7 @@ public abstract class AbstractPaymentIntegrationTest {
         Instant now = Instant.now();
         org.springframework.security.oauth2.jwt.JwtClaimsSet claims =
                 org.springframework.security.oauth2.jwt.JwtClaimsSet.builder()
+                        .id(java.util.UUID.randomUUID().toString())
                         .subject(subject.toString())
                         .issuer("choco-identity")
                         .issuedAt(now)

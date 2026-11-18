@@ -207,6 +207,7 @@ public abstract class AbstractGatewayIntegrationTest {
                            boolean mobileVerified) {
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder()
+                .id(java.util.UUID.randomUUID().toString())
                 .issuer("choco-identity")
                 .issuedAt(now)
                 .expiresAt(now.plus(Duration.ofMinutes(15)))

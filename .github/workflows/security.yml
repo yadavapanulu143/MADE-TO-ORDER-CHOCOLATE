@@ -88,3 +88,28 @@ jobs:
           scan-ref: .
           severity: 'CRITICAL,HIGH'
           exit-code: '0'
+
+  frontend-audit:
+    name: Frontend dependency audit (npm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [storefront, admin]
+    defaults:
+      run:
+        working-directory: frontend/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/${{ matrix.app }}/package-lock.json
+      # The frontend build installs with `--no-audit`, so nothing else checks these. Production
+      # dependencies only: a dev-only advisory is not shipped, and failing on one would make the job
+      # noise. `high` is the threshold — the shipped bundle is what a browser executes.
+      - run: npm ci --no-audit --no-fund
+      - name: npm audit (production dependencies, high and above)
+        run: npm audit --omit=dev --audit-level=high

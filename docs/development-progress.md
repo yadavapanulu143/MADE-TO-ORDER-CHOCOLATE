@@ -57,6 +57,11 @@ equal to the local hash after the push. The push succeeded on the first attempt 
 token refresh was needed. The previous milestone (Phase 6, payment-service: Razorpay orders,
 verification, webhooks, refunds and disputes) is at `707f193`.
 
+**Phase 14 security hardening pushed.** The F-2 (fail-closed production secrets) and F-3
+(proxy-aware HSTS) fixes are on `origin/main` at commit `8c996e1`; the remote hash was verified equal
+to the local hash after the push and the working tree is clean. The push succeeded on the first
+attempt this session.
+
 **Reporting milestone pushed.** The reporting service (read models, dashboards, CSV/XLSX exports) and
 the gateway routing coverage for its surface are pushed to `origin/main` at commit `105fb6d`; the
 remote hash was verified equal to the local hash (`git rev-parse HEAD` == `git rev-parse origin/main`)
@@ -678,7 +683,7 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | Never store passwords in plaintext | DONE | Argon2id/BCrypt tests assert hash ≠ plaintext |
 | Argon2id or BCrypt cost 15 | DONE | Tests assert `$argon2id$` and `$2a$15$` |
 | Never expose password hashes | DONE | `AuthenticatedUser` carries no credential field |
-| No auth secrets in exports | TODO | Enforced in Phase 9 export |
+| No auth secrets in exports | DONE | `AdminExportApiIT` proves the export masks email/mobile, needs `customer:export`, refuses a customer token and audits the download; `CsvXlsxExportWriterTest` neutralises formula injection. No hash, token or OTP column exists in any export view. |
 | Verify Razorpay on backend | DONE | `verifyCheckoutSignature` + provider re-fetch before a payment is marked paid; forged signature → `PAYMENT_SIGNATURE_INVALID` asserted in `PaymentJourneyIT` |
 | Never trust frontend payment response | DONE | A checkout redirect only triggers a server-side verify; the payment is marked paid only from the provider's captured state or a signed webhook |
 | Prevent duplicate payment processing | DONE | Unique `order_id`/`provider_payment_id` indexes; repeated webhook and repeated verify are no-ops (`PaymentJourneyIT`); `Idempotency-Key` with fingerprint conflict |

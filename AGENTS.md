@@ -716,7 +716,7 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1270 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1271 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -749,12 +749,12 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | fulfilment-app | 31 (4 architecture + 27 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
 | notification-application | 35 |
-| notification-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| notification-app | 29 (4 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
 | reporting-domain | 20 |
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1270** |
+| **total** | **1271** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
@@ -882,7 +882,10 @@ to end.
   is, and an `order.invoice-issued` emails the customer the invoice number and the billed total.
 - `AdminNotificationApiIT` — the admin log over real HTTP: list, counters and read are permission
   gated, a customer is refused, an unknown id is a 404, a delivered notification cannot be resent
-  (409) and a customer cannot trigger a resend (403).
+  (409) and a customer cannot trigger a resend (403). A failed notification (produced by stopping the
+  real SMTP sink) is resent successfully — the response is `SENT`, the message reaches the sink, and the
+  resend writes an audit row naming the administrator, which the test reads straight from `audit_log`
+  rather than trusting that the call happened.
 - `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
   provider SDK; the mail/SMS sender never leaks into the domain.
 

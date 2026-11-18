@@ -936,3 +936,27 @@ files undercounts and a naive per-file sum is not the total.
 | Ambiguous nullable search parameter | `function lower(bytea) does not exist` — PostgreSQL inferred the `:search is null` parameter as `bytea` | Build an escaped `LIKE` pattern in the adapter instead of a nullable parameter |
 | `@PreAuthorize` denial reported as 500 | A permission refusal returned `500 INTERNAL_ERROR` instead of `403` | `AccessDeniedExceptionHandler` in `common-security`; the shared catch-all advice lowered to `LOWEST_PRECEDENCE` so the specific handler wins |
 | Gateway did not route the admin catalogue | `/api/v1/admin/catalog/**` fell through to a 404 at the edge; the public settings path pattern did not match the real endpoint | Added the admin route and corrected the public-path list |
+
+---
+
+## Process closure
+
+Development is closed on commit `6939c51`. Every roadmap milestone is complete and the requirement
+table above has no open row — 131 rows, 130 `DONE`, 1 recorded as out of project scope (Kubernetes),
+0 open. The two immediate objectives of the final session — completing the notification service and
+closing the gateway admin-session security gap — were delivered in `399379c` and re-verified here
+against the running stack.
+
+The one defect the final independent verification found — the gateway's circuit-breaker `TimeLimiter`
+cancelling any proxied response slower than one second, which made the first request after a cold
+start return `503` while the downstream service had succeeded — is fixed, tested and pushed as
+`6939c51`; the details are in the "Defect found and fixed" section above and in `docs/handover.md`.
+
+**Final verification on `6939c51`:** `mvn clean verify` at `backend/` — **1273 tests, 0 failures, 0
+errors, 0 skipped**; storefront **105** tests; admin dashboard **34** tests; the end-to-end journey
+against the compose stack **33 passed, 0 failed**. Local `main` and `origin/main` both point at
+`6939c51` and the working tree is clean.
+
+What remains is maintenance against the external dependencies listed in `docs/security-review.md`
+section 11 and `docs/handover.md` section 9 — hosting and TLS, live Razorpay credentials, an SMS
+provider, and a production backup rehearsal — none of which is unfinished code.

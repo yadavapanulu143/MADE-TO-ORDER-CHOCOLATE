@@ -1,7 +1,8 @@
 # Repository Notes for Agents
 
 Single-seller, made-to-order chocolate e-commerce platform. See `docs/architecture.md` for the
-design and `docs/development-progress.md` for the requirement-by-requirement status.
+design, `docs/development-progress.md` for the requirement-by-requirement status, and
+`docs/handover.md` for the final close-out (state, evidence, external dependencies, next steps).
 
 ## Permanent development and execution rules
 

@@ -428,6 +428,22 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     `ChannelMessageSender`, and the test fails if the production wrap is ever removed. When the thing
     under test is *which exception a transport raises*, drive a real failure, not a fake one.
 
+50. **A conditional image tag built from an empty registry produces a leading slash, not no tag.**
+    `${{ needs.prepare.outputs.registry }}/svc:${{ github.sha }}` renders as `/svc:sha` when `REGISTRY`
+    is unset — an invalid reference that fails the build step. The publish gate must be part of the
+    same expression (`publish == 'true' && format('{0}/{1}:{2}', …) || ''`), and the always-on `:ci`
+    tag keeps a registry-less build valid. A blank line in a YAML `tags:` block is dropped by the
+    action; the empty string from `|| ''` is treated the same way, which is what makes the pattern
+    safe. Validate with `actionlint`, not just a YAML parse — a parse cannot see an expression that
+    only breaks at run time.
+
+51. **A file created in this sandbox lands mode 600, and a container that reads it as a non-root user
+    cannot.** `infra/prometheus/alert-rules.yml` was written `0600`, so `promtool` mounted read-only
+    reported *"permission denied"*. It is the same class of fault as the Postgres init scripts
+    (pitfall 1): a mounted config must be world-readable. Run `chmod 644` on every file under `infra/`
+    and `scripts/` (and `chmod 755` on the shell scripts) after creating it, or the container fails
+    to read its own configuration.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:

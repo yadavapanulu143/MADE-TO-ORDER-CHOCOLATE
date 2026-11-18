@@ -1,11 +1,19 @@
 name: Container images
 
-# Builds every service image and the two frontends to prove the Dockerfiles work. This does not push
-# to a registry: there is no registry configured for this project yet, and an image that is built but
+# Builds every service image and the two frontends to prove the Dockerfiles work. When a registry is
+# configured it also pushes them, so a deployment has something to pull.
+#
+# To publish, set these repository secrets:
+#   REGISTRY           e.g. ghcr.io/owner  or  registry.example.com/choco
+#   REGISTRY_USERNAME  the registry user (omit for GHCR, which accepts the GitHub actor)
+#   REGISTRY_PASSWORD  a token with push rights (omit for GHCR to use GITHUB_TOKEN)
+#
+# With no REGISTRY the job still builds every image and pushes nothing — an image that builds but is
 # never published is still a useful check that a Dockerfile change does not break the build.
 #
-# To publish, set REGISTRY and REGISTRY_USERNAME/REGISTRY_PASSWORD as repository secrets and add a
-# login and push step.
+# The `prepare` job decides once whether publishing is on, so no step has to reason about a missing
+# secret. Publishing only ever happens on a push to `main` or a manual run: a pull request builds and
+# tests the images but never publishes them.
 
 on:
   push:
@@ -29,10 +37,35 @@ concurrency:
 
 permissions:
   contents: read
+  # Needed only when REGISTRY is GHCR and no explicit REGISTRY_PASSWORD is set.
+  packages: write
 
 jobs:
+  # Decides whether to publish, once, from the presence of the REGISTRY secret. A pull request never
+  # publishes, whatever secrets exist.
+  prepare:
+    name: Resolve registry
+    runs-on: ubuntu-latest
+    outputs:
+      registry: ${{ steps.cfg.outputs.registry }}
+      publish: ${{ steps.cfg.outputs.publish }}
+    steps:
+      - id: cfg
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] || [ -z "$REGISTRY" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "No registry configured (or a pull request): building only."
+          else
+            echo "registry=${REGISTRY%/}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Publishing to ${REGISTRY%/}."
+          fi
+
   services:
     name: Service image ${{ matrix.name }}
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -66,21 +99,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.prepare.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
       - name: Build ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
           context: backend
           file: backend/Dockerfile
-          push: false
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
           build-args: |
             SERVICE_MODULE=${{ matrix.module }}
             SERVICE_JAR=${{ matrix.jar }}
-          tags: choco/${{ matrix.name }}-service:ci
+          # The `ci` tag is always applied so a registry-less build still has a tag. The registry tags
+          # are only rendered when publishing is on, because an empty REGISTRY would otherwise produce
+          # a leading slash (`/identity-service:sha`) and an invalid tag.
+          tags: |
+            choco/${{ matrix.name }}-service:ci
+            ${{ needs.prepare.outputs.publish == 'true' && format('{0}/{1}-service:{2}', needs.prepare.outputs.registry, matrix.name, github.sha) || '' }}
+            ${{ needs.prepare.outputs.publish == 'true' && github.ref == 'refs/heads/main' && format('{0}/{1}-service:latest', needs.prepare.outputs.registry, matrix.name) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
 
   frontends:
     name: Frontend image ${{ matrix.name }}
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -94,11 +143,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ needs.prepare.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
       - name: Build ${{ matrix.name }} image
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          push: false
-          tags: choco/${{ matrix.name }}:ci
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          tags: |
+            choco/${{ matrix.name }}:ci
+            ${{ needs.prepare.outputs.publish == 'true' && format('{0}/{1}:{2}', needs.prepare.outputs.registry, matrix.name, github.sha) || '' }}
+            ${{ needs.prepare.outputs.publish == 'true' && github.ref == 'refs/heads/main' && format('{0}/{1}:latest', needs.prepare.outputs.registry, matrix.name) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max

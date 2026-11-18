@@ -4,6 +4,11 @@ global:
   external_labels:
     environment: local
 
+# Alert rules live beside this file and are mounted by compose. Where the alerts are routed
+# (Alertmanager, Slack, email) is a deployment decision, not committed here.
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

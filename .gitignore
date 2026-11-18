@@ -35,6 +35,9 @@ data/
 logs/
 *.log
 
+# Database backups written by scripts/backup-databases.sh
+backups/
+
 # Agent scratch
 .agent_tmp/
 

@@ -702,9 +702,11 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 |---|---|---|
 | 14.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
 | 14.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
-| 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security,e2e}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, gitleaks + OWASP dependency-check + Trivy, and an end-to-end job that boots the compose stack and runs `scripts/e2e-journey.py` against it. No workflow pushes to a registry yet (none is configured). |
+| 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security,e2e}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, gitleaks + OWASP dependency-check + Trivy, and an end-to-end job that boots the compose stack and runs `scripts/e2e-journey.py` against it. `images.yml` **publishes** each image (SHA tag always, `latest` on `main` only) when a `REGISTRY` secret is set, and builds-only when it is not; a pull request never publishes. No automatic deployment — that is a deliberate host action. |
 | 14.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
 | 14.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
+| 14.5a | Alerting rules | DONE (infra) — `infra/prometheus/alert-rules.yml`: six rules (`ServiceDown`, `GatewayDown`, `HighHttpErrorRate`, `SlowHttpResponses`, `JvmHeapPressure`, `DatabaseConnectionPoolSaturated`) over existing Actuator metrics, loaded via `rule_files` and validated with `promtool check rules`. Routing to a pager is a deployment decision; the repo ships no Alertmanager, so alerts are visible in the Prometheus UI only. |
+| 14.5b | Scheduled backups with retention | DONE — `scripts/backup-databases.sh` dumps all seven databases, refuses to keep a dump missing any of them, and prunes by `BACKUP_RETENTION` days (default 14); the cron line and off-host copy requirement are documented in `docs/deployment.md`. |
 | 14.6 | Centralized logging | DONE (infra) — structured JSON on stdout; Loki + Promtail under the `observability` profile. |
 | 14.7 | Distributed tracing | DONE (infra) — Micrometer Tracing + OTLP exporter to Tempo, gated by `CHOCO_OTLP_ENABLED` so a service does not log a failed export every few seconds when no collector runs. |
 | 14.8 | Deployment documentation | DONE — `docs/deployment.md`: components, local and production shapes, the signing key, HTTPS placement, durability and volumes, backup/restore, operations and troubleshooting. |
@@ -729,6 +731,28 @@ HSTS was never emitted behind a TLS-terminating proxy because the request is see
 Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `ProductionDefaultsDriftTest`
 (1), `TrustedProxyHttpsMatcherTest` (8) and `GatewayHstsIT` (2, over real HTTP). See
 `docs/security-review.md` for the findings and evidence.
+
+**Production-preparation close-out (final session).** Three things the deployment story was still
+missing were added, each verified rather than assumed:
+
+- **Registry publishing.** `images.yml` now logs in and pushes each image (SHA tag always, `latest`
+  on a `main` push only) when a `REGISTRY` secret is configured, and builds-only when it is not — a
+  pull request never logs in and never pushes. Validated with `actionlint`; the tag expression is
+  gated on the publish flag so an unset registry cannot produce an invalid `/svc:sha` reference.
+- **Alerting.** `infra/prometheus/alert-rules.yml` holds six rules over metrics the services already
+  expose, wired in through `rule_files` and the compose mount, and validated with
+  `promtool check rules` (**6 rules found**) and `promtool check config` (**1 rule files found**).
+  Routing to a pager is a deployment decision; the repository ships no Alertmanager, and the docs say
+  so rather than implying alerts are delivered.
+- **Scheduled backups with retention.** `scripts/backup-databases.sh` dumps all seven databases,
+  refuses to keep a dump missing any of them, and prunes by age. Exercised against a real
+  `postgres:17.6-alpine`: a complete dump restored with the seeded `orders` rows intact (3/3), and a
+  dump missing `choco_catalog` was refused with exit 1 and deleted.
+
+**Cumulative verification after these changes:** `mvn clean verify` — **1271 tests, 0 failures, 0
+errors, 0 skipped** (all modules SUCCESS). Frontends: storefront **105** tests / 17 files, admin
+**34** tests / 10 files, both `vite build` clean. The only remaining TODO is 14.4 (Kubernetes
+manifests), deliberately deferred.
 
 ---
 

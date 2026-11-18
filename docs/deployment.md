@@ -188,15 +188,35 @@ responsibility and must be configured against the real deployment — see
 
 ## 6. Backup and restore
 
-Not automated in this repository; the commands below are the procedure to run against a real
-deployment.
+### Scheduled backups
+
+`scripts/backup-databases.sh` dumps every database, **proves the dump is complete before keeping it**,
+and prunes old ones. A truncated dump (the failure a full disk produces) is deleted and reported as a
+failure rather than left looking like a backup.
 
 ```bash
-# Back up every database in one file.
-docker exec choco-postgres pg_dumpall -U choco_root > backup-$(date +%F).sql
+# Run it from cron on the host that runs the stack, e.g. daily at 02:00 UTC.
+0 2 * * *  /srv/choco/scripts/backup-databases.sh >> /var/log/choco-backup.log 2>&1
+```
 
+| Setting | Default | Meaning |
+|---|---|---|
+| `BACKUP_DIR` | `./backups` | Where dumps are written. Put this on a volume that is itself backed up or replicated off-host. |
+| `BACKUP_RETENTION` | `14` | Days to keep. Older dumps are deleted by the script. |
+| `POSTGRES_CONTAINER` | `choco-postgres` | The container to dump from. |
+| `POSTGRES_USER` | `choco_root` | The role to dump as. |
+
+A local dump on the same disk as the database does not survive that disk failing. The retention above
+keeps two weeks locally; **copy the dumps off-host** (object storage, another volume) as part of the
+same schedule — `aws s3 cp` or `rsync` after the script, or point `BACKUP_DIR` at a mounted remote
+filesystem. That off-host copy is the part only you can configure, because it needs your storage
+credentials.
+
+### Restore
+
+```bash
 # Restore into a fresh instance.
-cat backup-2026-01-01.sql | docker exec -i choco-postgres psql -U choco_root -d postgres
+cat backups/choco-2026-01-01T020000Z.sql | docker exec -i choco-postgres psql -U choco_root -d postgres
 ```
 
 A backup is only proven when it has been restored. The restore must be rehearsed against a scratch
@@ -230,6 +250,16 @@ the first deployment and record the counts here.
 - **Logs.** Structured JSON on stdout; `docker compose logs -f <service>`. With the observability
   profile, logs also flow to Loki and traces to Tempo.
 - **Metrics.** `/actuator/prometheus` on every service; Prometheus scrapes them.
+- **Alerting.** `infra/prometheus/alert-rules.yml` holds six rules, all written against metrics the
+  services already expose, so nothing extra has to be instrumented: `ServiceDown`, `GatewayDown`,
+  `HighHttpErrorRate` (5xx above 5% for 5m), `SlowHttpResponses` (p95 above 2s for 10m),
+  `JvmHeapPressure` (heap above 90% for 10m) and `DatabaseConnectionPoolSaturated` (threads waiting
+  for a connection for 5m). Each carries a `for:` so a single scrape blip does not page anyone, and a
+  `severity` label. Prometheus loads them through `rule_files` in `prometheus.yml`; validate a change
+  with `promtool check rules`. **Where the alerts are routed is a deployment decision** — this
+  repository defines the conditions but ships no Alertmanager, so an alert is visible in the
+  Prometheus UI (`/alerts`) and nowhere else until you add one. That is the honest state: the rules
+  fire, but no one is paged.
 - **Graceful shutdown.** Services set `server.shutdown: graceful`, so an in-flight request finishes
   before the process exits.
 - **Restart policy.** `unless-stopped`, so a crashed service is restarted and a deliberately stopped
@@ -242,18 +272,39 @@ the first deployment and record the counts here.
 
 ## 8. CI/CD
 
-`.github/workflows/` holds four pipelines:
+`.github/workflows/` holds five pipelines:
 
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `backend.yml` | push to `main`, PR touching `backend/` | `mvn verify`: unit tests, integration tests against real PostgreSQL/Redis/RabbitMQ through Testcontainers, and the architecture enforcer rules. Uploads the surefire, failsafe and JaCoCo reports. |
 | `frontend.yml` | push to `main`, PR touching `frontend/` | For each app: `npm ci`, typecheck, `vitest run`, `vite build`. |
-| `images.yml` | changes to a Dockerfile or compose file | Builds every service image and both frontends. Does not push — there is no registry configured. |
+| `images.yml` | changes to a Dockerfile or compose file | Builds every service image and both frontends. **Pushes them when a registry is configured** (see below); a pull request always builds only. |
 | `security.yml` | every push and PR, plus weekly | gitleaks secret scan, OWASP dependency-check, and a Trivy filesystem and configuration scan. |
+| `e2e.yml` | push to `main` touching `backend/`, `frontend/` or a compose file | Boots the whole stack with `docker compose up` and drives `scripts/e2e-journey.py` against it over the gateway. |
 
-No workflow pushes to a registry or deploys. Adding a registry means setting `REGISTRY`,
-`REGISTRY_USERNAME` and `REGISTRY_PASSWORD` as repository secrets and adding a login and push step to
-`images.yml`.
+### Publishing images
+
+`images.yml` publishes to whatever registry you configure — it is off until you set one, so the
+default clone builds and tests without pushing anywhere.
+
+Set three repository secrets (**Settings → Secrets and variables → Actions**):
+
+| Secret | Value | Notes |
+|---|---|---|
+| `REGISTRY` | e.g. `ghcr.io/your-org` or `registry.example.com/choco` | The presence of this secret is what turns publishing on. No trailing slash needed. |
+| `REGISTRY_USERNAME` | the registry user | Optional for GHCR — omit it and the workflow uses the GitHub actor. |
+| `REGISTRY_PASSWORD` | a token with push rights | Optional for GHCR — omit it and the workflow uses the built-in `GITHUB_TOKEN` (the `packages: write` permission is already granted). |
+
+Each image is tagged with the commit SHA (immutable) and, on a push to `main` only, `latest`. A pull
+request never logs in and never pushes, so a fork cannot move `latest`. To deploy, pull
+`<REGISTRY>/<service>-service:<sha>`; the service names are `identity`, `catalog`, `order`, `payment`,
+`fulfilment`, `notification`, `reporting` and `gateway`, and the frontends are `storefront` and
+`admin`.
+
+Nothing deploys automatically. A deployment is a deliberate `docker compose` (or Kubernetes) action
+on the host, using the image tags the workflow published. Adding a CD step means adding a job that
+runs `docker compose -f docker-compose.prod.yml pull && up -d` on the target host over SSH; that host
+and its credentials are yours to provide, and are not committed.
 
 ---
 

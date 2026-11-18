@@ -1,0 +1,94 @@
+# Alerting rules for the made-to-order chocolate platform.
+#
+# These are deliberately few and each names a condition an operator must act on, not a metric that
+# merely moved. They are evaluated by Prometheus; where they are routed (Alertmanager, a Slack
+# webhook, an email relay) is a deployment decision and is not committed here — the same choice the
+# HTTPS termination makes.
+#
+# Every rule is written against Actuator/Micrometer metrics that the services already expose, so no
+# extra instrumentation is required. `for:` is set on each so a single scrape blip does not page
+# anyone.
+
+groups:
+  - name: choco-availability
+    rules:
+      # A service that cannot answer /actuator/health is down or wedged. 2m allows a rolling restart
+      # to finish before this fires.
+      - alert: ServiceDown
+        expr: up{job="choco-services"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is not reachable"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for 2 minutes. The service is down or its health endpoint is not answering."
+
+      # The gateway is the single entry point: if it is down the storefront and admin app are both
+      # unusable, whatever else is healthy.
+      - alert: GatewayDown
+        expr: up{job="choco-services", instance=~".*:8080"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The API gateway is down"
+          description: "Nothing reaches the services without the gateway. Check the gateway container and its Redis dependency."
+
+  - name: choco-errors
+    rules:
+      # A sustained 5xx rate means real requests are failing, not a stray probe. 5% over 5m is the
+      # level at which a customer notices.
+      - alert: HighHttpErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="choco-services", status=~"5.."}[5m])) by (instance)
+            /
+          sum(rate(http_server_requests_seconds_count{job="choco-services"}[5m])) by (instance)
+            > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} is returning 5xx for more than 5% of requests"
+          description: "Over the last 5 minutes more than one request in twenty to {{ $labels.instance }} failed with a server error."
+
+      # Latency, not just failure. p95 over 10m above 2s means the service is technically up but the
+      # experience is bad — the failure mode a 5xx alert never sees.
+      - alert: SlowHttpResponses
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket{job="choco-services"}[10m])) by (le, instance)
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} p95 latency above 2s"
+          description: "95% of requests to {{ $labels.instance }} took longer than 2 seconds over the last 10 minutes."
+
+  - name: choco-dependencies
+    rules:
+      # The JVM heap pressure that precedes an OOM kill. A restart clears it but loses in-flight work.
+      - alert: JvmHeapPressure
+        expr: |
+          sum(jvm_memory_used_bytes{job="choco-services", area="heap"}) by (instance)
+            /
+          sum(jvm_memory_max_bytes{job="choco-services", area="heap"}) by (instance)
+            > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} heap above 90%"
+          description: "{{ $labels.instance }} has used more than 90% of its heap for 10 minutes; an OutOfMemoryError is likely under further load."
+
+      # Connection-pool exhaustion: the service is up but every request waits for a database
+      # connection. This is what a slow query or a leaked connection looks like from outside.
+      - alert: DatabaseConnectionPoolSaturated
+        expr: |
+          hikaricp_connections_pending{job="choco-services"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }} has requests waiting for a database connection"
+          description: "The HikariCP pool on {{ $labels.instance }} has had threads waiting for a connection for 5 minutes."

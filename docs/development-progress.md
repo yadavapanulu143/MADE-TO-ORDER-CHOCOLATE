@@ -703,7 +703,7 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 | 14.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
 | 14.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
 | 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security,e2e}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, gitleaks + OWASP dependency-check + Trivy, and an end-to-end job that boots the compose stack and runs `scripts/e2e-journey.py` against it. `images.yml` **publishes** each image (SHA tag always, `latest` on `main` only) when a `REGISTRY` secret is set, and builds-only when it is not; a pull request never publishes. No automatic deployment — that is a deliberate host action. |
-| 14.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
+| 14.4 | Kubernetes manifests | NOT REQUIRED — OUT OF PROJECT SCOPE. Docker Compose is the selected deployment approach (`docker-compose.yml` + `docker-compose.app.yml` for the full stack, `docker-compose.prod.yml` for the production shape). Kubernetes was an optional alternative in the original direction, not a requirement, and the owner has confirmed it is out of scope. The images remain twelve-factor and probe-ready (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so this is a scope decision rather than an unfinished implementation; no manifests are authored and none are planned. |
 | 14.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
 | 14.5a | Alerting rules | DONE (infra) — `infra/prometheus/alert-rules.yml`: six rules (`ServiceDown`, `GatewayDown`, `HighHttpErrorRate`, `SlowHttpResponses`, `JvmHeapPressure`, `DatabaseConnectionPoolSaturated`) over existing Actuator metrics, loaded via `rule_files` and validated with `promtool check rules`. Routing to a pager is a deployment decision; the repo ships no Alertmanager, so alerts are visible in the Prometheus UI only. |
 | 14.5b | Scheduled backups with retention | DONE — `scripts/backup-databases.sh` dumps all seven databases, refuses to keep a dump missing any of them, and prunes by `BACKUP_RETENTION` days (default 14); the cron line and off-host copy requirement are documented in `docs/deployment.md`. |
@@ -751,8 +751,29 @@ missing were added, each verified rather than assumed:
 
 **Cumulative verification after these changes:** `mvn clean verify` — **1271 tests, 0 failures, 0
 errors, 0 skipped** (all modules SUCCESS). Frontends: storefront **105** tests / 17 files, admin
-**34** tests / 10 files, both `vite build` clean. The only remaining TODO is 14.4 (Kubernetes
-manifests), deliberately deferred.
+**34** tests / 10 files, both `vite build` clean.
+
+**Scope decision (final handover): Kubernetes is out of scope.** Docker Compose is the selected and
+documented deployment approach. Phase 14.4 is therefore recorded as **NOT REQUIRED — OUT OF PROJECT
+SCOPE**, not as an unfinished requirement. Every requirement in this tracker is now either DONE or
+deliberately out of scope; none is open.
+
+### Defect found and fixed during final independent verification
+
+A defect that no unit test and no warm end-to-end run had exposed was found by exercising the
+**cold-start** path — the first request a real user makes after the stack comes up, which the CI
+journey never did because it waits for every container to be healthy before driving the journey and
+the services are then warm.
+
+| Defect | Symptom | Root cause | Fix |
+|---|---|---|---|
+| The circuit breaker imposed a hidden one-second timeout on every proxied call | The **first** request after a cold start returned `503` (~1.05s) from the gateway's circuit-breaker fallback while the identity service had, in fact, completed and committed the registration (`CUSTOMER_REGISTERED` SUCCESS in the audit log). Every subsequent request succeeded. It reproduced on 3/3 fresh cold starts and read as a flaky service rather than a gateway limit | `spring-cloud-circuitbreaker-resilience4j` wraps every call in a Resilience4j `TimeLimiter` whose `ofDefaults()` is `Duration.ofSeconds(1)` with `cancelRunningFuture=true`. A cold JVM's first request, or Argon2 password hashing during registration (~0.9s by design), legitimately exceeded it, so the response was cancelled and replaced by the fallback even though the service was healthy | `spring.cloud.circuitbreaker.resilience4j.disable-time-limiter: true` on the gateway. The bound that is meant to apply is the proxy read timeout (`spring.http.client.read-timeout`, 10s, configurable); a second, tighter, invisible one must not exist. On this synchronous stack the call is already bounded by the read timeout, and a connect or read timeout still surfaces as an exception the breaker counts |
+
+`GatewayCircuitBreakerTimeoutIT` (2 tests) pins both halves of the behaviour and is proven to catch the
+defect: a 1.5s response is delivered (it fails with `503` when the flag is removed) and a 3s response
+is still refused, so removing the TimeLimiter did not leave the route unbounded. The test delays
+*before* the response starts, as a slow handler does — a MockWebServer `setBodyDelay` sends the headers
+first, so the stall falls outside the guarded call and the defect does not reproduce.
 
 ---
 
@@ -804,7 +825,7 @@ manifests), deliberately deferred.
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 16 | 51 | 67 |
+| gateway | 16 | 53 | 69 |
 | fulfilment-domain | 90 | – | 90 |
 | fulfilment-application | 37 | – | 37 |
 | fulfilment-app | 4 | 27 | 31 |
@@ -815,7 +836,7 @@ manifests), deliberately deferred.
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **967** | **304** | **1271** |
+| **Total** | **967** | **306** | **1273** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -826,9 +847,10 @@ files undercounts and a naive per-file sum is not the total.
 
 | Class | Tests | What it proves |
 |---|---|---|
-| RoutingIT | 29 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment, order, invoice and notification surfaces reach their services with a token and are refused without one; the report, export and dashboard surfaces reach the reporting service with the token intact and are refused at the edge without one |
+| RoutingIT | 31 | A public request reaches its service unauthenticated; a protected request with a valid token arrives with the token intact; a missing, forged, expired or wrong-issuer token is refused at the edge and never forwarded; an unknown path is not routed; the correlation id is preserved; an administrator refreshes and logs out at the edge with no access token; a public serviceability lookup and a customer's own fulfilment progress reach the fulfilment service while the administrative kitchen surface is refused without a token; the administrative payment, order, invoice and notification surfaces reach their services with a token and are refused without one; the report, export and dashboard surfaces reach the reporting service with the token intact and are refused at the edge without one |
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
+| GatewayCircuitBreakerTimeoutIT | 2 | A healthy service slower than one second is delivered rather than 503'd (fails when the breaker's hidden one-second TimeLimiter is left enabled), and a response beyond the configured read timeout is still refused, so the route did not become unbounded |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
 | GatewayHstsIT | 2 | A request over plain HTTP gets no `Strict-Transport-Security`; a trusted proxy's `X-Forwarded-Proto: https` does; a forged one from an untrusted peer does not |
 | GatewayRevocationIT | 6 | The edge consults the Redis revocation store before forwarding: a live token is proxied, a revoked session is a 401 that never reaches the downstream, a logged-out administrator cannot reach `/api/v1/admin/notifications`, revocation is scoped to one session, and a subject cutoff refuses only tokens issued before it |

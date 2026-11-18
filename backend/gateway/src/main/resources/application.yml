@@ -19,6 +19,22 @@ spring:
     client:
       connect-timeout: ${CHOCO_GW_CONNECT_TIMEOUT:2s}
       read-timeout: ${CHOCO_GW_READ_TIMEOUT:10s}
+  cloud:
+    circuitbreaker:
+      resilience4j:
+        # The circuit breaker's own TimeLimiter is turned off, because its Spring Cloud default is a
+        # 1-second timeout with cancelRunningFuture=true and it wraps *every* proxied call. That
+        # silently cancelled any downstream response that legitimately took longer than a second — a
+        # cold JVM's first request, or Argon2 password hashing during registration (~1s by design) —
+        # and answered 503 from the fallback even though the service was healthy and had, in fact,
+        # completed the work. The bound that is actually meant to apply is the proxy read timeout
+        # above (10s, configurable); a second, tighter, undocumented limit is the very "duplicated
+        # default" this codebase avoids, and the two would drift. Disabling the TimeLimiter also
+        # drops a needless executor hop: on this blocking stack the call is already synchronous and
+        # bounded by the read timeout, and a connection or read timeout still surfaces as an
+        # exception the breaker counts. Verified by GatewayCircuitBreakerTimeoutIT, which fails with
+        # a 503 when this is removed.
+        disable-time-limiter: true
 
 choco:
   gateway:

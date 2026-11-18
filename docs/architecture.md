@@ -7,10 +7,17 @@ online prepayment through Razorpay.
 
 Eight backend deployables behind one gateway, plus two frontend apps.
 
+**Deployment approach: Docker Compose.** The selected and documented way to run this platform is
+Docker Compose — `docker-compose.yml` (infrastructure) plus `docker-compose.app.yml` (the ten
+application containers) for a full local or single-host stack, and `docker-compose.prod.yml` for the
+production shape. Kubernetes is explicitly out of scope; the images are nevertheless twelve-factor
+(config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so an
+alternative orchestrator would only need manifests, not code changes.
+
 | Component | Port (local) | Role |
 |---|---|---|
 | storefront (React/Vite) | 5173 (dev) / 80 (nginx) | customer website — implemented in `frontend/storefront` |
-| admin (React/Vite) | 5174 | seller dashboard — Phase 13 |
+| admin (React/Vite) | 5174 | seller dashboard — implemented in `frontend/admin` |
 | api-gateway | 8080 | single entry point, JWT validation, rate limiting |
 | identity-service | 8081 | customers, admins, addresses, OTP, tokens, audit |
 | catalog-service | 8082 | products, variants, prices, website settings |

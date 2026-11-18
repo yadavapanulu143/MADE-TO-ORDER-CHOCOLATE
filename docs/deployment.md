@@ -301,8 +301,10 @@ request never logs in and never pushes, so a fork cannot move `latest`. To deplo
 `fulfilment`, `notification`, `reporting` and `gateway`, and the frontends are `storefront` and
 `admin`.
 
-Nothing deploys automatically. A deployment is a deliberate `docker compose` (or Kubernetes) action
-on the host, using the image tags the workflow published. Adding a CD step means adding a job that
+Nothing deploys automatically. A deployment is a deliberate `docker compose` action on the host,
+using the image tags the workflow published. **Docker Compose is the selected deployment approach for
+this project** (`docker-compose.yml` + `docker-compose.app.yml`, with `docker-compose.prod.yml` for
+the production shape); Kubernetes is out of scope. Adding a CD step means adding a job that
 runs `docker compose -f docker-compose.prod.yml pull && up -d` on the target host over SSH; that host
 and its credentials are yours to provide, and are not committed.
 

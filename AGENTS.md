@@ -36,9 +36,9 @@ integration and future session. They are not optional and are not renegotiated p
      `order-service`) → Reporting and Customer Exports (done, the `reporting-service`) → Customer
      Storefront (done, `frontend/storefront`) → Admin Dashboard (done, `frontend/admin`) → Docker
      Compose / Deployment / CI-CD (done, Phase 14). The end-to-end journey and handover are done.
-     The only open item is **14.4 Kubernetes-ready manifests**, deliberately deferred because no
-     cluster is in scope; the images are already twelve-factor and probe-ready, so authoring
-     manifests nothing runs would be ceremony. `docs/development-progress.md` is the source of truth.
+     **Kubernetes is out of project scope** — Docker Compose is the selected deployment approach, and
+     Phase 14.4 is recorded as *not required* rather than unfinished. `docs/development-progress.md`
+     is the source of truth; no roadmap item is open.
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
@@ -387,8 +387,8 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
 
 46. **A development credential default is one forgotten flag away from production.** The compose prod
     overlay requires every secret with `${VAR:?}`, but that guard lives in one file: a bare
-    `java -jar`, a Kubernetes manifest or a forgotten `-f` bypasses it, and each service's
-    `application.yml` then falls back to `choco_*_pw`. `ProductionConfigurationGuard` is the second
+    `java -jar`, a hand-written orchestrator definition or a forgotten `-f` bypasses it, and each
+    service's `application.yml` then falls back to `choco_*_pw`. `ProductionConfigurationGuard` is the second
     line — a `prod`-profile listener that reads the *resolved* environment and refuses to boot on a
     missing, blank or default password. Two details make it correct: it is **scoped per capability**
     (it checks `spring.datasource.password` only when `spring.datasource.url` is set, so the gateway,
@@ -446,6 +446,24 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     (pitfall 1): a mounted config must be world-readable. Run `chmod 644` on every file under `infra/`
     and `scripts/` (and `chmod 755` on the shell scripts) after creating it, or the container fails
     to read its own configuration.
+
+52. **A circuit breaker's own TimeLimiter is a second, hidden timeout, and Spring Cloud's default is
+    one second.** `spring-cloud-circuitbreaker-resilience4j` wraps *every* call in a Resilience4j
+    `TimeLimiter` whose `ofDefaults()` is `Duration.ofSeconds(1)` with `cancelRunningFuture=true`. On
+    the blocking Gateway MVC stack that silently cancelled any proxied response that legitimately took
+    longer than a second — a cold JVM's first request, or Argon2 hashing during registration, which is
+    deliberately slow (~0.9s) — and answered `503` from the circuit-breaker fallback even though the
+    downstream service was healthy and had already committed the work. The first request after a cold
+    start failed and every later one succeeded, which reads as a flaky service rather than a gateway
+    limit. It is the same "duplicated default" trap as pitfall 13: the bound that is meant to apply is
+    the proxy read timeout (`spring.http.client.read-timeout`, 10s), and a second, tighter, invisible
+    one must not exist. The fix is `spring.cloud.circuitbreaker.resilience4j.disable-time-limiter:
+    true` on the gateway; on this synchronous stack the call is already bounded by the read timeout,
+    and a connect or read timeout still surfaces as an exception the breaker counts.
+    `GatewayCircuitBreakerTimeoutIT` pins both halves — a 1.5s response is delivered, a 3s one is
+    refused — and it fails with a 503 when the flag is removed. Note the delay must happen *before* the
+    response starts (as a slow handler does); a MockWebServer `setBodyDelay` sends the headers first,
+    so the stall lands outside the guarded call and the defect does not reproduce.
 
 ## Payment service conventions
 
@@ -735,7 +753,7 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1271 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1273 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -762,7 +780,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 67 (16 unit + 51 integration: real Redis) |
+| gateway | 69 (16 unit + 53 integration: real Redis) |
 | fulfilment-domain | 90 |
 | fulfilment-application | 37 |
 | fulfilment-app | 31 (4 architecture + 27 integration: real PostgreSQL, Redis, RabbitMQ) |
@@ -773,7 +791,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1271** |
+| **total** | **1273** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently

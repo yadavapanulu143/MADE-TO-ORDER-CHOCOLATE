@@ -55,7 +55,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?set IDENTITY_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -81,7 +81,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -97,7 +97,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?set ORDER_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -113,7 +113,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?set PAYMENT_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -135,7 +135,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_FULFILMENT_DB_PASSWORD: ${FULFILMENT_DB_PASSWORD:?set FULFILMENT_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -151,7 +151,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -172,7 +172,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_REPORTING_DB_PASSWORD: ${REPORTING_DB_PASSWORD:?set REPORTING_DB_PASSWORD in .env.production}
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
@@ -188,7 +188,7 @@ services:
     environment:
       # Activates ProductionConfigurationGuard, which refuses to start if any
       # credential is still a development default. Compose's ${VAR:?} is the first line;
-      # this is the one that also covers a bare java -jar or a Kubernetes deploy.
+      # this is the one that also covers a bare java -jar or any non-compose deploy.
       SPRING_PROFILES_ACTIVE: prod
       CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
       # Only the two real frontend origins; a wildcard here would let any site call the API with a

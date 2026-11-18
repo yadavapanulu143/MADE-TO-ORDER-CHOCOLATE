@@ -50,12 +50,25 @@ jobs:
       # Reports findings without failing the build on a CVSS threshold, because a fail-on-threshold
       # job that blocks every push on an unfixed upstream advisory gets disabled. The report is the
       # artifact; a real decision about an advisory is made in the security review.
+      #
+      # The NVD data feed needs an API key: without one the plugin cannot update its data and the
+      # whole job fails with a cryptic "Invalid API Key" error on every push. Rather than leave a red
+      # X that trains people to ignore the tab, the scan runs when the `NVD_API_KEY` repository secret
+      # is set and otherwise says so and skips — Trivy's filesystem scan still covers dependency
+      # advisories for the same lockfiles, so the pipeline is not left unscanned.
       - name: OWASP dependency-check
         working-directory: backend
-        run: >
-          mvn -B -ntp org.owasp:dependency-check-maven:check
-          -DfailBuildOnCVSS=11
-          -DskipTestScope=true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -z "${NVD_API_KEY}" ]; then
+            echo "::warning::NVD_API_KEY is not set, so the OWASP dependency-check scan is skipped. Add the repository secret (see docs/security-review.md) to enable it. Trivy still scans the dependency lockfiles."
+            exit 0
+          fi
+          mvn -B -ntp org.owasp:dependency-check-maven:check \
+            -DfailBuildOnCVSS=11 \
+            -DskipTestScope=true \
+            -DnvdApiKey="${NVD_API_KEY}"
       - name: Upload dependency-check report
         if: always()
         uses: actions/upload-artifact@v4
@@ -73,7 +86,7 @@ jobs:
       # Scans the source tree for vulnerable dependencies and misconfiguration without building an
       # image, so it runs quickly on every push.
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -82,7 +95,7 @@ jobs:
           format: table
           exit-code: '0'
       - name: Trivy config scan (Dockerfiles, compose)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: .

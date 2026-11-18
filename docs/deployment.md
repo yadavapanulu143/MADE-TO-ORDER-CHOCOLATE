@@ -202,6 +202,24 @@ cat backup-2026-01-01.sql | docker exec -i choco-postgres psql -U choco_root -d 
 A backup is only proven when it has been restored. The restore must be rehearsed against a scratch
 instance and the result checked (row counts on `orders`, `payments`, `customers`), not assumed.
 
+**Rehearsal, run against the local compose stack:**
+
+```bash
+docker exec choco-postgres pg_dumpall -U choco_root > /tmp/backup.sql   # 194 KB
+docker run -d --name choco-restore-rehearsal -e POSTGRES_PASSWORD=scratch_pw postgres:17.6-alpine
+docker cp /tmp/backup.sql choco-restore-rehearsal:/tmp/b.sql
+docker exec choco-restore-rehearsal psql -U postgres -d postgres -f /tmp/b.sql
+```
+
+Result: `psql` reported **zero errors**; all seven service databases (`choco_identity`,
+`choco_catalog`, `choco_order`, `choco_payment`, `choco_fulfilment`, `choco_notification`,
+`choco_reporting`) were recreated with their tables, and row counts matched the source exactly —
+`orders` 3/3, `payments` 0/0, `customers` 3/3, `products` 1/1, and the `flyway_schema_history`
+row count per database (3/2/1 for identity/order/payment). That is the whole point of the exercise:
+a dump that restores the schema but loses rows, or loses the migration history, would leave a
+service unable to start or silently missing data. Re-run this against the production instance after
+the first deployment and record the counts here.
+
 ---
 
 ## 7. Operational notes

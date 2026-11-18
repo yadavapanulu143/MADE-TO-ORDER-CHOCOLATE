@@ -139,21 +139,50 @@ time-bounded.
 
 ## 7. Frontend security
 
-Not yet built. The requirements recorded for the storefront and admin dashboard: render with React's
-default escaping and never `dangerouslySetInnerHTML` on untrusted content; keep secrets out of Vite
-environment variables (only the Razorpay publishable key id may reach the browser); protect
-customer-specific routes and rely on server-enforced authorization, never on hiding a control;
-configure a Content-Security-Policy and the other headers at the reverse proxy. This section is
-completed with evidence when the frontends land.
+Two React + Vite + TypeScript single-page apps (`frontend/storefront`, `frontend/admin`) talk only to
+the API gateway and are served by nginx.
+
+- **Rendering.** No `dangerouslySetInnerHTML` anywhere in either app (verified by grep); all
+  server-provided text renders through React's default escaping, so a customer name or an order label
+  containing markup is displayed, not executed.
+- **Secrets in the browser.** The only Vite variable either app reads is `VITE_API_BASE_URL`, a
+  non-secret URL. The Razorpay publishable key id is the only credential that reaches the browser;
+  the key secret and webhook secret never leave the backend.
+- **Authorization is server-side.** The permissions read from the access token hide controls the
+  server would refuse anyway; every administrative action is authorised again in the owning service,
+  and the frontends rely on that, never on a hidden button.
+- **Headers.** Both `nginx.conf` files set `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and a
+  `Content-Security-Policy` with `default-src 'self'` and `object-src 'none'`. The storefront CSP
+  names only the Razorpay checkout and API hosts it genuinely needs; the admin CSP names none.
+- **Tests.** `npm test` runs Vitest with jsdom: storefront 105 tests, admin 34. The network is the one
+  seam faked (a stubbed `fetch`); nothing the app owns is mocked.
 
 ## 8. HTTPS and deployment security
 
-Not yet configured. Production must terminate TLS with a trusted certificate (Let's Encrypt or the
-platform), serve HTTPS only, disable debug and development endpoints, restrict database, Redis,
-RabbitMQ and internal service ports to the private network, and supply secrets through a secret
-manager. The local stack exposes the infrastructure ports on localhost only, for development. This
-section is completed with evidence when the deployment configuration lands; HTTPS is not claimed
-until it is verified.
+**HTTPS is not yet provisioned and is not claimed.** No domain, host or TLS certificate exists; that
+remains a documented blocker (see §11). The code is written for the TLS-terminating proxy that will
+sit in front: `TrustedProxyHttpsMatcher` emits HSTS when the request is directly secure or when a
+configured trusted proxy reports `X-Forwarded-Proto: https`, and an untrusted peer can neither force
+HSTS on nor suppress it.
+
+What the deployment configuration *does* enforce, verified locally:
+
+- **Fail-closed configuration.** `ProductionConfigurationGuard` refuses to start a `prod`-profile
+  service when a configured capability's password is missing, blank or still a development default.
+  `docker-compose.prod.yml` additionally requires every credential with `${VAR:?}`, so a missing one
+  fails the whole stack with the variable named rather than silently using a default.
+- **Least privilege in the container.** The production overlay sets `read_only: true` and
+  `no-new-privileges:true` on the application containers.
+- **Ports.** The local stack publishes infrastructure ports on localhost only, for development; the
+  production overlay publishes no infrastructure port.
+- **No registry or deploy step.** `images.yml` builds every image but pushes nothing — no registry is
+  configured. `docs/deployment.md` records the secrets to set to add one.
+
+Verified locally this milestone: all ten images built; the app compose file brought fourteen
+containers to `(healthy)`; a registration → email-OTP verification ran through the gateway; the admin
+login → protected read → logout → refused-token sequence ran against the live stack. Production
+compose resolves with every secret set and fails closed (naming the variable) when one is missing.
 
 ---
 
@@ -221,8 +250,12 @@ audited.
   development environment works end to end; this must be replaced with a real provider before
   production, and the "reported as sent" behaviour must not be mistaken for a real delivery.
 - **HTTPS, domain, hosting and TLS certificates are not yet provisioned.** Documented as a blocker;
-  unrelated work continues.
-- **Backups and recovery are documented but not yet verified end to end.** Scheduled with Phase 14.
+  unrelated work continues. The code is written for the terminating proxy (`TrustedProxyHttpsMatcher`)
+  and is verified up to that point; HTTPS is not claimed until it is deployed and checked.
+- **Backups are documented and the restore has been rehearsed** against the local stack: all seven
+  databases and their rows came back with zero `psql` errors (`docs/deployment.md` §6). It has **not**
+  been rehearsed against a production instance, which does not exist yet, and the rehearsal is manual
+  rather than scheduled — an operator must run it. Both remain to be closed after the first deployment.
 
 ## 12. Security maintenance procedure
 

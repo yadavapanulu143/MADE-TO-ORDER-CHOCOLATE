@@ -1,0 +1,104 @@
+name: Container images
+
+# Builds every service image and the two frontends to prove the Dockerfiles work. This does not push
+# to a registry: there is no registry configured for this project yet, and an image that is built but
+# never published is still a useful check that a Dockerfile change does not break the build.
+#
+# To publish, set REGISTRY and REGISTRY_USERNAME/REGISTRY_PASSWORD as repository secrets and add a
+# login and push step.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/Dockerfile'
+      - 'backend/docker-entrypoint.sh'
+      - 'frontend/**/Dockerfile'
+      - 'docker-compose*.yml'
+      - '.github/workflows/images.yml'
+  pull_request:
+    paths:
+      - 'backend/Dockerfile'
+      - 'frontend/**/Dockerfile'
+      - '.github/workflows/images.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  services:
+    name: Service image ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: identity
+            module: services/identity-service/identity-app
+            jar: 'identity-app-*.jar'
+          - name: catalog
+            module: services/catalog-service/catalog-app
+            jar: 'catalog-app-*.jar'
+          - name: order
+            module: services/order-service/order-app
+            jar: 'order-app-*.jar'
+          - name: payment
+            module: services/payment-service/payment-app
+            jar: 'payment-app-*.jar'
+          - name: fulfilment
+            module: services/fulfilment-service/fulfilment-app
+            jar: 'fulfilment-app-*.jar'
+          - name: notification
+            module: services/notification-service/notification-app
+            jar: 'notification-app-*.jar'
+          - name: reporting
+            module: services/reporting-service/reporting-app
+            jar: 'reporting-app-*.jar'
+          - name: gateway
+            module: gateway
+            jar: 'api-gateway-*.jar'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: false
+          build-args: |
+            SERVICE_MODULE=${{ matrix.module }}
+            SERVICE_JAR=${{ matrix.jar }}
+          tags: choco/${{ matrix.name }}-service:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+
+  frontends:
+    name: Frontend image ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: storefront
+            context: frontend/storefront
+          - name: admin
+            context: frontend/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          tags: choco/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max

@@ -1,0 +1,90 @@
+name: Security
+
+# Practical, automated checks from the security review. These are the ones that catch a real,
+# common mistake in this repository: a committed credential, a vulnerable dependency, a vulnerable
+# base image, and an obvious injection in a first-party dependency. They are not a substitute for
+# the review in docs/security-review.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a newly disclosed vulnerability in a dependency we already ship is noticed without
+    # waiting for the next code change.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-check:
+    name: Dependency vulnerabilities (OWASP dependency-check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      # Reports findings without failing the build on a CVSS threshold, because a fail-on-threshold
+      # job that blocks every push on an unfixed upstream advisory gets disabled. The report is the
+      # artifact; a real decision about an advisory is made in the security review.
+      - name: OWASP dependency-check
+        working-directory: backend
+        run: >
+          mvn -B -ntp org.owasp:dependency-check-maven:check
+          -DfailBuildOnCVSS=11
+          -DskipTestScope=true
+      - name: Upload dependency-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: backend/**/target/dependency-check-report.*
+          if-no-files-found: ignore
+
+  container-scan:
+    name: Container scan (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Scans the source tree for vulnerable dependencies and misconfiguration without building an
+      # image, so it runs quickly on every push.
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          format: table
+          exit-code: '0'
+      - name: Trivy config scan (Dockerfiles, compose)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'

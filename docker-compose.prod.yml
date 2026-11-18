@@ -1,0 +1,185 @@
+# ---------------------------------------------------------------------------
+# Production-shaped overrides.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.app.yml -f docker-compose.prod.yml up -d
+#
+# What this file changes, and why:
+#
+#   * Every credential is *required* (`${VAR:?}`). A production stack that silently fell back to the
+#     development password `choco_redis_pw` would be a stack with a published password. Compose
+#     refuses to start instead, and the message names the variable to set.
+#   * Only the gateway and the two frontends publish a host port. The seven services are reachable
+#     only on the compose network, so they cannot be reached around the gateway's edge auth.
+#   * Infrastructure ports (PostgreSQL, Redis, RabbitMQ, Mailpit) are not published at all.
+#   * The services run with a read-only root filesystem and no privilege escalation. The catalogue
+#     image volume is the one writable path.
+#   * TLS is *not* terminated here. A reverse proxy (nginx, Caddy, a cloud load balancer) terminates
+#     HTTPS in front of the gateway and the frontends; see docs/deployment.md. Nothing in this file
+#     claims to serve HTTPS by itself.
+#
+# `.env.production` holds the real values and is never committed. `docs/deployment.md` lists every
+# variable that must be set and how to generate the JWT signing key.
+# ---------------------------------------------------------------------------
+
+name: choco
+
+services:
+  postgres:
+    ports: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?set POSTGRES_ROOT_PASSWORD in .env.production}
+
+  redis:
+    ports: !reset []
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+
+  rabbitmq:
+    ports: !reset []
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+
+  mailpit:
+    # Mailpit is a development mail sink. In production the SMTP settings point at the real provider
+    # and this service is not started (`--scale mailpit=0` or omit it by removing the profile).
+    profiles: [dev-mail]
+
+  # ---- Application services ---------------------------------------------------------------------
+
+  identity-service:
+    environment:
+      CHOCO_IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?set IDENTITY_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+      CHOCO_SMTP_USER: ${SMTP_USER:-}
+      CHOCO_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      CHOCO_SMTP_AUTH: ${SMTP_AUTH:-true}
+      CHOCO_SMTP_TLS: ${SMTP_TLS:-true}
+      CHOCO_ADMIN_BOOTSTRAP_EMAIL: ${CHOCO_ADMIN_BOOTSTRAP_EMAIL:-}
+      CHOCO_ADMIN_BOOTSTRAP_PASSWORD: ${CHOCO_ADMIN_BOOTSTRAP_PASSWORD:-}
+      CHOCO_LOG_OTP: "false"
+    read_only: true
+    tmpfs:
+      - /tmp
+      # The entrypoint stages the mounted signing key here; the root filesystem is read-only, so this
+      # needs its own writable tmpfs. It holds only a copy of the key and disappears with the container.
+      - /run/secrets-staged
+    security_opt:
+      - no-new-privileges:true
+
+  catalog-service:
+    environment:
+      CHOCO_CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  order-service:
+    environment:
+      CHOCO_ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?set ORDER_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  payment-service:
+    environment:
+      CHOCO_PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?set PAYMENT_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+      # Live keys are required to take money. Without them the service refuses every money-moving
+      # call rather than pretending a payment succeeded — a deliberate fail-closed default.
+      CHOCO_RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:?set RAZORPAY_KEY_ID in .env.production}
+      CHOCO_RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:?set RAZORPAY_KEY_SECRET in .env.production}
+      CHOCO_RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:?set RAZORPAY_WEBHOOK_SECRET in .env.production}
+      CHOCO_RAZORPAY_ENABLED: "true"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  fulfilment-service:
+    environment:
+      CHOCO_FULFILMENT_DB_PASSWORD: ${FULFILMENT_DB_PASSWORD:?set FULFILMENT_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  notification-service:
+    environment:
+      CHOCO_NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+      CHOCO_SMTP_USER: ${SMTP_USER:-}
+      CHOCO_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      CHOCO_SMTP_AUTH: ${SMTP_AUTH:-true}
+      CHOCO_SMTP_TLS: ${SMTP_TLS:-true}
+      CHOCO_SMS_API_KEY: ${CHOCO_SMS_API_KEY:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  reporting-service:
+    environment:
+      CHOCO_REPORTING_DB_PASSWORD: ${REPORTING_DB_PASSWORD:?set REPORTING_DB_PASSWORD in .env.production}
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env.production}
+      CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env.production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  gateway:
+    environment:
+      CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env.production}
+      # Only the two real frontend origins; a wildcard here would let any site call the API with a
+      # customer's credentials attached by the browser.
+      CHOCO_CORS_ORIGINS: ${CHOCO_CORS_ORIGINS:?set CHOCO_CORS_ORIGINS in .env.production}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+  storefront:
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true
+
+  admin:
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    security_opt:
+      - no-new-privileges:true

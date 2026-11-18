@@ -1,0 +1,11 @@
+# The image builds from source, so a local target/ directory would only bloat the build context and
+# risk a stale jar being copied in. Excluding it also makes the dependency-resolution layer cache
+# meaningful.
+target/
+**/target/
+.git
+.gitignore
+*.iml
+.idea/
+secrets/
+*.pem

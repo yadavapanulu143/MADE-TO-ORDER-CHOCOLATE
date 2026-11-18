@@ -1,0 +1,71 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
+  workflow_dispatch:
+
+# One in-flight run per ref; a new push cancels the previous, still-running one. Integration tests
+# are the expensive part, so cancelling a superseded run matters.
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, unit and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # `verify` runs unit tests under surefire, integration tests under failsafe (real PostgreSQL,
+      # Redis and RabbitMQ through Testcontainers), and the enforcer rules. Docker is available on
+      # the GitHub runner, which is what the *IT classes need.
+      - name: mvn verify
+        working-directory: backend
+        run: mvn -B -ntp verify
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: backend/**/target/surefire-reports/**
+          if-no-files-found: ignore
+
+      - name: Upload failsafe reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failsafe-reports
+          path: backend/**/target/failsafe-reports/**
+          if-no-files-found: ignore
+
+      - name: Upload JaCoCo coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-reports
+          path: backend/**/target/site/jacoco/**
+          if-no-files-found: ignore

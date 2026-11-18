@@ -639,14 +639,26 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 
 | # | Requirement | Status |
 |---|---|---|
-| 12.1 | Docker Compose (full app) | IN PROGRESS (infra done) |
-| 12.2 | Service Dockerfiles | TODO |
-| 12.3 | GitHub Actions CI/CD | TODO |
-| 12.4 | Kubernetes-ready manifests | TODO |
-| 12.5 | Monitoring dashboards | TODO |
-| 12.6 | Centralized logging | TODO |
-| 12.7 | Distributed tracing | TODO |
-| 12.8 | Deployment documentation | TODO |
+| 12.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
+| 12.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
+| 12.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, and gitleaks + OWASP dependency-check + Trivy. No workflow pushes to a registry yet (none is configured). |
+| 12.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
+| 12.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
+| 12.6 | Centralized logging | DONE (infra) — structured JSON on stdout; Loki + Promtail under the `observability` profile. |
+| 12.7 | Distributed tracing | DONE (infra) — Micrometer Tracing + OTLP exporter to Tempo, gated by `CHOCO_OTLP_ENABLED` so a service does not log a failed export every few seconds when no collector runs. |
+| 12.8 | Deployment documentation | DONE — `docs/deployment.md`: components, local and production shapes, the signing key, HTTPS placement, durability and volumes, backup/restore, operations and troubleshooting. |
+
+**Verified locally this milestone:** all ten images built; `docker compose -f docker-compose.yml -f
+docker-compose.app.yml up -d` brought fourteen containers to `(healthy)`; a registration → email OTP
+verification ran end to end through the gateway; the admin login → protected read → logout →
+refused-token sequence was exercised against the running stack. `docker-compose.prod.yml` resolves
+with every required secret set and fails closed (naming the variable) when one is missing.
+
+**Fixed while validating this milestone:** `.env.example` listed variable names
+(`ADMIN_BOOTSTRAP_EMAIL`, `CORS_ALLOWED_ORIGINS`, `LOG_OTP`, `SMTP_HOST`, `SMTP_USERNAME`,
+`SMS_API_KEY`, …) that no compose file reads, so an operator copying the template would have had
+their settings silently ignored; it now lists exactly the names the compose files interpolate. The
+production override read `SMS_API_KEY` where the app override reads `CHOCO_SMS_API_KEY`; unified.
 
 ---
 

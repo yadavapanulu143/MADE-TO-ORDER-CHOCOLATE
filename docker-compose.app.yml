@@ -1,0 +1,348 @@
+# ---------------------------------------------------------------------------
+# The application stack: gateway, the seven services and the two frontends.
+#
+# This file is an *override* for docker-compose.yml, which owns the infrastructure
+# (PostgreSQL, Redis, RabbitMQ and the observability profile). Start everything with:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.app.yml up -d --build
+#
+# or, for a production-shaped run where every credential must come from the environment:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.app.yml -f docker-compose.prod.yml up -d
+#
+# Only the gateway and the two frontends publish a host port. The services are reachable on the
+# compose network by name and are deliberately not exposed, so a service cannot be reached around
+# the gateway's edge authentication.
+# ---------------------------------------------------------------------------
+
+name: choco
+
+x-app-common: &app-common
+  restart: unless-stopped
+  networks: [choco-net]
+  # The JVM flags come from the image (JAVA_TOOL_OPTIONS); this caps the container itself so one
+  # runaway service cannot starve PostgreSQL or RabbitMQ of memory on a small host.
+  deploy:
+    resources:
+      limits:
+        memory: 768M
+
+x-app-env: &app-env
+  CHOCO_REDIS_HOST: redis
+  CHOCO_REDIS_PORT: "6379"
+  CHOCO_REDIS_PASSWORD: ${REDIS_PASSWORD:-choco_redis_pw}
+  CHOCO_RABBITMQ_HOST: rabbitmq
+  CHOCO_RABBITMQ_PORT: "5672"
+  CHOCO_RABBITMQ_USER: ${RABBITMQ_USER:-choco}
+  CHOCO_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-choco_rabbit_pw}
+  CHOCO_JWK_SET_URI: http://identity-service:8081/.well-known/jwks.json
+  CHOCO_LOG_LEVEL: ${CHOCO_LOG_LEVEL:-INFO}
+  CHOCO_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
+  # Trace export is off unless the observability profile is running, because a service that keeps
+  # failing to reach an absent collector logs an error every few seconds. Turn it on together with
+  # `docker compose --profile observability up`: CHOCO_OTLP_ENABLED=true.
+  MANAGEMENT_OTLP_TRACING_EXPORT_ENABLED: ${CHOCO_OTLP_ENABLED:-false}
+  # The browser origin of the two frontends, so CORS allows exactly those and nothing else.
+  CHOCO_CORS_ORIGINS: ${CHOCO_CORS_ORIGINS:-http://localhost:5173,http://localhost:5174}
+
+# Waits for the infrastructure a service cannot start without. The health conditions are what make
+# `up -d` deterministic: without them a service would start before Flyway could reach PostgreSQL and
+# exit on the first connection failure.
+x-deps-infra: &deps-infra
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+
+services:
+  identity-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/identity-service/identity-app
+        SERVICE_JAR: identity-app-*.jar
+    image: choco/identity-service:local
+    container_name: choco-identity
+    environment:
+      <<: *app-env
+      CHOCO_IDENTITY_DB_URL: jdbc:postgresql://postgres:5432/choco_identity
+      CHOCO_IDENTITY_DB_USER: choco_identity
+      CHOCO_IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:-choco_identity_pw}
+      CHOCO_PASSWORD_ALGORITHM: ${PASSWORD_HASH_ALGORITHM:-argon2id}
+      # A stable signing key, mounted as a directory so a missing key degrades to a logged warning
+      # instead of Docker creating a directory where the file should be. See scripts/generate-jwt-keys.sh.
+      CHOCO_JWK_LOCATION: /run/secrets/jwt-private-key
+      CHOCO_ADMIN_BOOTSTRAP_EMAIL: ${CHOCO_ADMIN_BOOTSTRAP_EMAIL:-}
+      CHOCO_ADMIN_BOOTSTRAP_PASSWORD: ${CHOCO_ADMIN_BOOTSTRAP_PASSWORD:-}
+      CHOCO_ADMIN_BOOTSTRAP_NAME: ${CHOCO_ADMIN_BOOTSTRAP_NAME:-Administrator}
+      CHOCO_SMTP_HOST: ${MAIL_HOST:-mailpit}
+      CHOCO_SMTP_PORT: ${MAIL_PORT:-1025}
+      CHOCO_MAIL_FROM: ${MAIL_FROM:-no-reply@chocolate.local}
+      # Never true outside a development machine: a logged OTP is a usable OTP.
+      CHOCO_LOG_OTP: ${CHOCO_LOG_OTP:-false}
+    # The signing key is a compose secret: mounted read-only at /run/secrets/jwt-private-key. The
+    # image's entrypoint stages a readable copy for the unprivileged user before the JVM starts,
+    # because the bind-mounted file keeps the host's ownership and mode. See scripts/generate-jwt-keys.sh.
+    secrets:
+      - jwt-private-key
+    depends_on:
+      <<: *deps-infra
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  catalog-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/catalog-service/catalog-app
+        SERVICE_JAR: catalog-app-*.jar
+    image: choco/catalog-service:local
+    container_name: choco-catalog
+    environment:
+      <<: *app-env
+      CHOCO_CATALOG_DB_URL: jdbc:postgresql://postgres:5432/choco_catalog
+      CHOCO_CATALOG_DB_USER: choco_catalog
+      CHOCO_CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-choco_catalog_pw}
+      CHOCO_CATALOG_IMAGE_ROOT: /app/data/catalog-images
+    volumes:
+      - catalog-images:/app/data/catalog-images
+    depends_on:
+      <<: *deps-infra
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  order-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/order-service/order-app
+        SERVICE_JAR: order-app-*.jar
+    image: choco/order-service:local
+    container_name: choco-order
+    environment:
+      <<: *app-env
+      CHOCO_ORDER_DB_URL: jdbc:postgresql://postgres:5432/choco_order
+      CHOCO_ORDER_DB_USER: choco_order
+      CHOCO_ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:-choco_order_pw}
+      # Synchronous downstreams, addressed by service name on the compose network.
+      CHOCO_IDENTITY_URI: http://identity-service:8081
+      CHOCO_CATALOG_URI: http://catalog-service:8082
+      CHOCO_PAYMENT_URI: http://payment-service:8084
+      CHOCO_FULFILMENT_URI: http://fulfilment-service:8085
+    depends_on:
+      <<: *deps-infra
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  payment-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/payment-service/payment-app
+        SERVICE_JAR: payment-app-*.jar
+    image: choco/payment-service:local
+    container_name: choco-payment
+    environment:
+      <<: *app-env
+      CHOCO_PAYMENT_DB_URL: jdbc:postgresql://postgres:5432/choco_payment
+      CHOCO_PAYMENT_DB_USER: choco_payment
+      CHOCO_PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-choco_payment_pw}
+      # Absent keys leave the service bootable but refusing every money-moving call — it never
+      # pretends a payment succeeded. See UnconfiguredPaymentGateway.
+      CHOCO_RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      CHOCO_RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      CHOCO_RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      CHOCO_RAZORPAY_ENABLED: ${RAZORPAY_ENABLED:-false}
+    depends_on:
+      <<: *deps-infra
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  fulfilment-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/fulfilment-service/fulfilment-app
+        SERVICE_JAR: fulfilment-app-*.jar
+    image: choco/fulfilment-service:local
+    container_name: choco-fulfilment
+    environment:
+      <<: *app-env
+      CHOCO_FULFILMENT_DB_URL: jdbc:postgresql://postgres:5432/choco_fulfilment
+      CHOCO_FULFILMENT_DB_USER: choco_fulfilment
+      CHOCO_FULFILMENT_DB_PASSWORD: ${FULFILMENT_DB_PASSWORD:-choco_fulfilment_pw}
+      CHOCO_FULFILMENT_MAX_UNITS: ${CHOCO_FULFILMENT_MAX_UNITS:-0}
+      CHOCO_FULFILMENT_PROOF_REQUIRED: ${CHOCO_FULFILMENT_PROOF_REQUIRED:-false}
+    depends_on:
+      <<: *deps-infra
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  notification-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/notification-service/notification-app
+        SERVICE_JAR: notification-app-*.jar
+    image: choco/notification-service:local
+    container_name: choco-notification
+    environment:
+      <<: *app-env
+      CHOCO_NOTIFICATION_DB_URL: jdbc:postgresql://postgres:5432/choco_notification
+      CHOCO_NOTIFICATION_DB_USER: choco_notification
+      CHOCO_NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-choco_notification_pw}
+      CHOCO_SMTP_HOST: ${MAIL_HOST:-mailpit}
+      CHOCO_SMTP_PORT: ${MAIL_PORT:-1025}
+      CHOCO_NOTIFICATIONS_FROM: ${MAIL_FROM:-no-reply@chocolate.local}
+      CHOCO_SELLER_EMAIL: ${CHOCO_SELLER_EMAIL:-}
+      CHOCO_SELLER_MOBILE: ${CHOCO_SELLER_MOBILE:-}
+      CHOCO_SMS_GATEWAY_URL: ${CHOCO_SMS_GATEWAY_URL:-}
+      CHOCO_SMS_API_KEY: ${CHOCO_SMS_API_KEY:-}
+      CHOCO_NOTIFICATION_MAX_ATTEMPTS: ${CHOCO_NOTIFICATION_MAX_ATTEMPTS:-3}
+    depends_on:
+      <<: *deps-infra
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8086/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  reporting-service:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: services/reporting-service/reporting-app
+        SERVICE_JAR: reporting-app-*.jar
+    image: choco/reporting-service:local
+    container_name: choco-reporting
+    environment:
+      <<: *app-env
+      CHOCO_REPORTING_DB_URL: jdbc:postgresql://postgres:5432/choco_reporting
+      CHOCO_REPORTING_DB_USER: choco_reporting
+      CHOCO_REPORTING_DB_PASSWORD: ${REPORTING_DB_PASSWORD:-choco_reporting_pw}
+    depends_on:
+      <<: *deps-infra
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8087/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  gateway:
+    <<: *app-common
+    build:
+      context: ./backend
+      args:
+        SERVICE_MODULE: gateway
+        SERVICE_JAR: api-gateway-*.jar
+    image: choco/gateway:local
+    container_name: choco-gateway
+    environment:
+      <<: *app-env
+      CHOCO_IDENTITY_URI: http://identity-service:8081
+      CHOCO_CATALOG_URI: http://catalog-service:8082
+      CHOCO_ORDER_URI: http://order-service:8083
+      CHOCO_PAYMENT_URI: http://payment-service:8084
+      CHOCO_FULFILMENT_URI: http://fulfilment-service:8085
+      CHOCO_NOTIFICATION_URI: http://notification-service:8086
+      CHOCO_REPORTING_URI: http://reporting-service:8087
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  # Mailpit captures the mail the notification service sends, so a local run never mails a real
+  # address and the seller can read the rendered messages at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    container_name: choco-mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    networks: [choco-net]
+
+  storefront:
+    build:
+      context: ./frontend/storefront
+    image: choco/storefront:local
+    container_name: choco-storefront
+    restart: unless-stopped
+    ports:
+      - "${STOREFRONT_PORT:-5173}:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [choco-net]
+
+  admin:
+    build:
+      context: ./frontend/admin
+    image: choco/admin:local
+    container_name: choco-admin
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_PORT:-5174}:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks: [choco-net]
+
+secrets:
+  jwt-private-key:
+    file: ./secrets/jwt-private.pem
+
+volumes:
+  catalog-images:

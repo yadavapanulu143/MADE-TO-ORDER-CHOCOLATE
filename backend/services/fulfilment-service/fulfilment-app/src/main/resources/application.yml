@@ -65,10 +65,14 @@ spring:
 choco:
   security:
     issuer: choco-identity
-    # The serviceability path is deliberately open to any signed-in caller: the checkout asks whether
-    # the seller delivers to a PIN code, and the answer is the same for everyone. Every other path is
-    # scoped to the caller's own data or guarded by an admin permission.
-    public-paths: []
+    # The serviceability probe is unauthenticated, matching the gateway's own public-path list and
+    # the storefront's public "Delivery areas" page. It answers only whether the seller delivers to a
+    # PIN code and at what charge — the same answer for everyone, with no customer data — so a
+    # visitor can check coverage before signing in. Leaving it protected here while the gateway
+    # forwards it unauthenticated is what made that page return 401. Every other path is scoped to
+    # the caller's own data or guarded by an admin permission.
+    public-paths:
+      - /api/v1/serviceability/**
     jwk-set-uri: ${CHOCO_JWK_SET_URI:http://localhost:8081/.well-known/jwks.json}
   cors:
     allowed-origins: ${CHOCO_CORS_ORIGINS:http://localhost:5173,http://localhost:5174}

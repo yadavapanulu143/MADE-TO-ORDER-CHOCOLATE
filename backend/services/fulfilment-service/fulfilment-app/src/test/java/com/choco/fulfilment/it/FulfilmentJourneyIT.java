@@ -330,6 +330,25 @@ class FulfilmentJourneyIT extends AbstractFulfilmentIntegrationTest {
         }
 
         @Test
+        @DisplayName("the serviceability probe answers an anonymous visitor, matching the gateway")
+        void anonymousIsAnswered() {
+            // The gateway lists this path as public and the storefront shows a "Delivery areas" page
+            // before sign-in. If the service keeps it protected the page returns 401 through the
+            // gateway even though every other public path works, which is exactly what happened.
+            HttpResponse<String> response = get("/api/v1/serviceability/560001", null);
+
+            assertThat(response.statusCode()).isEqualTo(200);
+            assertThat(json(response).get("serviceable").asBoolean()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an anonymous visitor still cannot reach the administrative kitchen")
+        void anonymousCannotReachAdmin() {
+            assertThat(get("/api/v1/admin/fulfilment/production/jobs", null).statusCode()).isIn(401, 403);
+            assertThat(get("/api/v1/admin/fulfilment/serviceable-areas", null).statusCode()).isIn(401, 403);
+        }
+
+        @Test
         @DisplayName("a covered PIN code is quoted at the configured charge")
         void coveredIsQuoted() {
             post("/api/v1/admin/fulfilment/serviceable-areas",

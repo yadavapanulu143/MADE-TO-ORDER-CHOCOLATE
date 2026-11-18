@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1260 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1262 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
 dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
@@ -67,6 +67,17 @@ the gateway routing coverage for its surface are pushed to `origin/main` at comm
 remote hash was verified equal to the local hash (`git rev-parse HEAD` == `git rev-parse origin/main`)
 and the working tree is clean. The push succeeded on the first attempt; no token refresh, force-push
 or history rewrite was needed. The preceding milestone (invoice issuance and access) is at `4a708c7`.
+
+**Serviceability public-path mismatch fixed (Phase 11.3).** Driving the whole journey with
+`scripts/e2e-journey.py` surfaced a real defect the per-service integration tests had missed: the
+gateway's public-path list and the storefront treat `/api/v1/serviceability/**` as unauthenticated —
+the "Delivery areas" page sits outside `ProtectedRoute` — but the fulfilment service's own
+`choco.security.public-paths` was empty, so the service answered `401` for an anonymous visitor. The
+edge's public list is a forwarding decision; the owning service still makes the authorisation
+decision, and the two lists must agree. `FulfilmentJourneyIT.anonymousIsAnswered` now pins the
+service end (proven meaningful: it returns `401` and fails when the fulfilment `public-paths` is
+emptied) and `FulfilmentJourneyIT.anonymousCannotReachAdmin` proves the administrative kitchen stayed
+closed. `fulfilment-app` moves 28 → 30 tests; the cumulative total moves 1260 → **1262**.
 
 ---
 
@@ -535,7 +546,7 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 |---|---|---|
 | 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (945 green across every module) |
 | 11.2 | Integration tests (Testcontainers) | IN PROGRESS (288 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
-| 11.3 | End-to-end workflows | TODO |
+| 11.3 | End-to-end workflows | IN PROGRESS — `scripts/e2e-journey.py` drives the whole customer→seller journey against a running stack through the gateway (register → email/mobile OTP → sign-in → address → catalogue → serviceability → checkout → verified capture → kitchen job → preparation → delivery → notification fan-out → invoice → admin dashboard/export). It is a smoke harness, not a substitute for the per-service `*IT` suites; the next step is a CI job that boots the compose stack and runs it. |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
 | 11.6 | Data privacy / export test | DONE — `AdminExportApiIT` proves the customer export masks the email and mobile (the raw values never appear in the file), the export needs `customer:export` beyond `report:read`, a customer token is refused, the download is `no-store` and the act is audited; `CsvXlsxExportWriterTest` proves a formula-injection cell is neutralised |
@@ -806,7 +817,7 @@ files undercounts and a naive per-file sum is not the total.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 11 | Flyway applied V1 against a real PostgreSQL; Hibernate `validate` matches the migration; every database constraint holds — a non-positive quantity, a negative stock level, a negative delivery charge and an out-of-range status are all rejected, and one delivery per order is enforced by a unique index |
-| FulfilmentJourneyIT | 12 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one; the customer sees only their own progress; the admin surface is closed to customers |
+| FulfilmentJourneyIT | 15 | The made-to-order hand-over over a real RabbitMQ broker and real HTTP: a confirmed order opens one kitchen job per line and a redelivered event opens none (idempotent consumption); the seller walks a job received → awaiting → preparing → completed → packaging → ready for dispatch, which opens exactly one delivery at the frozen address; an illegal jump is refused; a cancelled order abandons its jobs and returns any consumed ingredients; a serviceability quote returns the configured charge for a covered PIN and a reasoned "not serviceable" for an uncovered one, **and answers an anonymous visitor** (the gateway lists the path as public and the storefront's "Delivery areas" page is unauthenticated) while an anonymous visitor still cannot reach the administrative kitchen; the customer sees only their own progress; the admin surface is closed to customers |
 | CleanArchitectureTest | 4 | The domain depends on no framework; the application layer depends on no adapter or persistence framework; inbound adapters do not reach into persistence; nothing depends on the wiring configuration |
 
 ### Reporting integration tests (`mvn verify`)

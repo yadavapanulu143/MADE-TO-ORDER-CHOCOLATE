@@ -407,6 +407,18 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     gateway. An untrusted client can neither force HSTS on (a false positive pins a scheme the host
     may not serve) nor suppress it.
 
+48. **A path public at the gateway and protected at the service is a 401 that looks like a bug in
+    something else.** The gateway's `GatewayProperties.publicPaths` listed `/api/v1/serviceability/**`
+    so an anonymous visitor could check delivery coverage, and the storefront's "Delivery areas" page
+    is deliberately outside `ProtectedRoute` — but the fulfilment service's own `public-paths` was
+    empty, so it answered 401. Every other public path worked, so the failure read as a broken page
+    rather than an authorisation mismatch, and `RoutingIT` did not catch it because its downstream is
+    a MockWebServer that never enforces auth. The edge's public list is a *forwarding* decision, not
+    an authorisation one: the owning service still decides, and the two lists must agree. A path is
+    public at both ends or at neither. `FulfilmentJourneyIT.anonymousIsAnswered` pins the service end
+    (it fails with 401 if the fulfilment `public-paths` is emptied), and the companion
+    `anonymousCannotReachAdmin` proves the change did not open the administrative surface.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:
@@ -695,7 +707,7 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1260 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1262 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -725,7 +737,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | gateway | 67 (16 unit + 51 integration: real Redis) |
 | fulfilment-domain | 88 |
 | fulfilment-application | 37 |
-| fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
+| fulfilment-app | 30 (4 architecture + 26 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
 | notification-application | 34 |
 | notification-app | 24 (4 architecture + 20 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
@@ -733,7 +745,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1260** |
+| **total** | **1262** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
@@ -833,7 +845,10 @@ chain verifies.
   order opens one job per line, a redelivery opens none, the seller walks a job to ready for dispatch
   (which opens exactly one delivery at the frozen address), an illegal jump is refused, a cancelled
   order abandons its jobs, a serviceability quote answers a covered PIN with its charge and an
-  uncovered one with a reason, and the customer/admin boundary holds.
+  uncovered one with a reason **and answers an anonymous visitor too** (the gateway lists the path as
+  public and the storefront's "Delivery areas" page is unauthenticated, so the service must not keep
+  it protected), an anonymous visitor still cannot reach the administrative kitchen, and the
+  customer/admin boundary holds.
 - `CleanArchitectureTest` — the domain and application layers depend on no framework, adapter or
   persistence technology; inbound adapters do not reach into persistence.
 

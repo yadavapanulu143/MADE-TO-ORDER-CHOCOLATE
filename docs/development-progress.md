@@ -578,13 +578,13 @@ Endpoints: `GET /api/v1/dashboard`, `GET /api/v1/reports/{type}` (`SALES`, `ORDE
 
 | # | Requirement | Status |
 |---|---|---|
-| 11.1 | Unit tests (JUnit 5, Mockito where justified) | IN PROGRESS (945 green across every module) |
-| 11.2 | Integration tests (Testcontainers) | IN PROGRESS (288 green: real PostgreSQL, Redis, RabbitMQ, SMTP across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway) |
+| 11.1 | Unit tests (JUnit 5, Mockito where justified) | DONE — 967 unit tests green across every module (`mvn clean verify`); domain rules, use cases, state transitions, validation, authorization and retry/idempotency are exercised, with mocks only where a seam genuinely needs one |
+| 11.2 | Integration tests (Testcontainers) | DONE — 302 integration tests green: real PostgreSQL, Redis, RabbitMQ and a GreenMail SMTP sink across identity, catalog, order, payment, fulfilment, notification, reporting and the gateway, driven over real HTTP with the real security filter chain |
 | 11.3 | End-to-end workflows | DONE — `scripts/e2e-journey.py` drives the whole customer→seller journey against a running stack through the gateway (register → email/mobile OTP → sign-in → address → catalogue → serviceability → checkout → verified capture → kitchen job → preparation → delivery → notification fan-out → invoice → admin dashboard/export). It self-seeds the catalogue and a serviceable PIN code through the seller API when the stack is empty, so it runs against a fresh volume (which is what CI starts from) with no manual setup, and it is wired into CI by `.github/workflows/e2e.yml`, which boots the compose stack and runs it on every relevant push. It is a smoke harness, not a substitute for the per-service `*IT` suites. |
 | 11.4 | Concurrent order processing test | DONE — `OrderPaymentIT` starts two simultaneous payments; `FulfilmentJourneyIT` proves idempotent consumption over a real broker |
 | 11.5 | Payment verification test | DONE — `PaymentJourneyIT` (forged signature refused, signed capture paid, duplicate webhook a no-op) |
 | 11.6 | Data privacy / export test | DONE — `AdminExportApiIT` proves the customer export masks the email and mobile (the raw values never appear in the file), the export needs `customer:export` beyond `report:read`, a customer token is refused, the download is `no-store` and the act is audited; `CsvXlsxExportWriterTest` proves a formula-injection cell is neutralised |
-| 11.7 | Security tests | IN PROGRESS — authz boundaries, ownership isolation and rate limiting are covered per service; a consolidated suite and `docs/security-review.md` are pending |
+| 11.7 | Security tests | DONE — `docs/security-review.md` records the architecture, findings by severity, fixes and evidence; authz boundaries, ownership isolation, rate limiting, gateway access-token revocation, CORS and payment/webhook signature verification are each covered by a named test in the owning service's suite |
 
 ## Phase 12 — Customer storefront
 
@@ -734,12 +734,12 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | Prevent duplicate payment processing | DONE | Unique `order_id`/`provider_payment_id` indexes; repeated webhook and repeated verify are no-ops (`PaymentJourneyIT`); `Idempotency-Key` with fingerprint conflict |
 | Webhook signature verified over the raw body | DONE | `RazorpayPaymentGatewayTest` computes real HMACs; an unsigned or tampered webhook is refused |
 | No card/CVV/UPI-PIN ever stored | DONE | Only identifiers and a coarse method classification exist in the schema; asserted by the migration's column set |
-| Prevent incorrect order/inventory status | IN PROGRESS | Order state machine done (Phase 5); production state machine in Phase 7 |
+| Prevent incorrect order/inventory status | DONE | Explicit transition tables — `OrderStatus`, `ProductionStatus`, `DeliveryStatus` — refuse an illegal edge; a status field is never set directly, and the domain and IT suites exercise the whole lifecycle plus the refused jumps |
 | Customers access only own data | DONE | `requireOwnerOrAdmin` + tests |
 | Admin access protected | DONE | RBAC + permission tests; separate admin aggregate, no public admin sign-up, customer credentials rejected at the admin endpoint (verified over HTTP) |
 | Never hardcode credentials | DONE | `.env.example` only, no values committed |
 | Never fabricate payment/delivery data | DONE | Delivery is manual by design |
-| Error handling and audit logs | IN PROGRESS | Error handling done; audit log in Phase 3 |
+| Error handling and audit logs | DONE | `GlobalExceptionHandler` (RFC 9457) with `AccessDeniedExceptionHandler` ahead of the catch-all so a refusal is a 403, not a 500; an audit adapter and `audit_log` migration exist in identity, payment, fulfilment, notification and reporting, and a sensitive act (an export, a payment transition, a delivery step) writes a row naming the actor |
 
 ---
 

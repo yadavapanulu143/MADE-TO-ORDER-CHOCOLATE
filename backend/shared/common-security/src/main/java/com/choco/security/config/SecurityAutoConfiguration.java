@@ -2,6 +2,7 @@ package com.choco.security.config;
 
 import com.choco.core.port.TokenRevocationRegistry;
 import com.choco.security.revocation.RevocationAwareJwtDecoder;
+import com.choco.security.web.TrustedProxyHttpsMatcher;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
@@ -78,7 +79,8 @@ public class SecurityAutoConfiguration {
             HttpSecurity http,
             JwtAuthenticationConverter jwtAuthenticationConverter,
             CorsConfigurationSource corsConfigurationSource,
-            SecurityProperties securityProperties) throws Exception {
+            SecurityProperties securityProperties,
+            @Value("${choco.http.trusted-proxies:}") List<String> trustedProxies) throws Exception {
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -108,7 +110,11 @@ public class SecurityAutoConfiguration {
                                 .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
                         .httpStrictTransportSecurity(hsts -> hsts
                                 .includeSubDomains(true)
-                                .maxAgeInSeconds(31_536_000)));
+                                .maxAgeInSeconds(31_536_000)
+                                // Behind a TLS-terminating proxy isSecure() is false, so the
+                                // default matcher would never emit HSTS. Trust the forwarded scheme
+                                // only from a configured proxy, matching ClientIpResolver's rule.
+                                .requestMatcher(new TrustedProxyHttpsMatcher(trustedProxies))));
 
         return http.build();
     }

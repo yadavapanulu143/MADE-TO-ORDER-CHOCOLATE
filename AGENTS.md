@@ -382,6 +382,31 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     a session and a cutoff value for a subject, each with a TTL equal to the access-token lifetime, so
     the store self-expires and never grows with the user count.
 
+46. **A development credential default is one forgotten flag away from production.** The compose prod
+    overlay requires every secret with `${VAR:?}`, but that guard lives in one file: a bare
+    `java -jar`, a Kubernetes manifest or a forgotten `-f` bypasses it, and each service's
+    `application.yml` then falls back to `choco_*_pw`. `ProductionConfigurationGuard` is the second
+    line — a `prod`-profile listener that reads the *resolved* environment and refuses to boot on a
+    missing, blank or default password. Two details make it correct: it is **scoped per capability**
+    (it checks `spring.datasource.password` only when `spring.datasource.url` is set, so the gateway,
+    which has no database, is not blocked), and it runs at `LOWEST_PRECEDENCE` so Spring Boot has
+    already loaded `application.yml` into the environment. A listener registered in
+    `META-INF/spring.factories` (not the `AutoConfiguration.imports` file) is what fires that early.
+    `ProductionDefaultsDriftTest` reads every service `application.yml` and fails if a new
+    `${...:choco_..._pw}` default is not in the guard's list, so the list cannot silently fall behind.
+47. **Behind a TLS-terminating proxy, `request.isSecure()` is false and HSTS is never sent.**
+    Spring Security's `HstsHeaderWriter` uses a `SecureRequestMatcher` that trusts `isSecure()` alone,
+    so a proxy that terminates TLS and forwards plain HTTP to the app gets no
+    `Strict-Transport-Security` at all — the header is configured, looks right, and does nothing. The
+    usual remedy, `server.forward-headers-strategy=framework`, is the wrong one here: it rewrites
+    `remoteAddr` from the client-supplied `X-Forwarded-For`, which defeats `ClientIpResolver`'s rule
+    (trust the forwarded address only when the immediate peer is a configured proxy) and re-opens the
+    rate-limiter bypass. `TrustedProxyHttpsMatcher` reads `X-Forwarded-Proto` only from a peer in
+    `choco.http.trusted-proxies` — the same property `ClientIpResolver` uses, so the scheme rule and
+    the address rule cannot drift — and is the HSTS request matcher for both the shared chain and the
+    gateway. An untrusted client can neither force HSTS on (a false positive pins a scheme the host
+    may not serve) nor suppress it.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:

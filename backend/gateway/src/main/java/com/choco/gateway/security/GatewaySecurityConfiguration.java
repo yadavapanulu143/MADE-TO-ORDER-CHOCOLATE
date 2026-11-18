@@ -2,7 +2,9 @@ package com.choco.gateway.security;
 
 import com.choco.gateway.config.GatewayProperties;
 import com.choco.gateway.routing.RoutingConfiguration;
+import com.choco.security.web.TrustedProxyHttpsMatcher;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -54,7 +56,8 @@ public class GatewaySecurityConfiguration {
                                                    JwtDecoder jwtDecoder,
                                                    JwtAuthenticationConverter jwtAuthenticationConverter,
                                                    CorsConfigurationSource corsConfigurationSource,
-                                                   GatewayErrorResponder errorResponder) throws Exception {
+                                                   GatewayErrorResponder errorResponder,
+                                                   @Value("${choco.http.trusted-proxies:}") List<String> trustedProxies) throws Exception {
         List<String> publicPaths = properties.getPublicPaths();
 
         http
@@ -91,7 +94,11 @@ public class GatewaySecurityConfiguration {
                                 .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.NO_REFERRER))
                         .httpStrictTransportSecurity(hsts -> hsts
                                 .includeSubDomains(true)
-                                .maxAgeInSeconds(31_536_000)));
+                                .maxAgeInSeconds(31_536_000)
+                                // The gateway is the first hop inside the network, so it is where a
+                                // reverse proxy's X-Forwarded-Proto is read; the shared rule keeps
+                                // the scheme trust identical to the client-address rule.
+                                .requestMatcher(new TrustedProxyHttpsMatcher(trustedProxies))));
 
         return http.build();
     }

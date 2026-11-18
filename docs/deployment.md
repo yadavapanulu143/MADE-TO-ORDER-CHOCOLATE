@@ -116,6 +116,7 @@ What the production override changes:
 | `MAIL_HOST`, `MAIL_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_AUTH`, `SMTP_TLS`, `MAIL_FROM` | Outbound mail. The identity and notification services read `CHOCO_SMTP_*`; the compose files map these names onto them. |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Payment provider. Without them the payment service starts but refuses every money-moving call — it fails closed. |
 | `CHOCO_CORS_ORIGINS` | The browser origins allowed to call the API, comma-separated. Required so production never wildcards CORS; set it to the real storefront and dashboard origins. |
+| `CHOCO_HTTP_TRUSTED_PROXIES` | The address(es) of the TLS-terminating proxy, so HSTS is emitted only for genuinely HTTPS requests and `X-Forwarded-For` is trusted only from that peer. Leave unset to trust no proxy (the safe default). |
 | `CHOCO_ADMIN_BOOTSTRAP_EMAIL`, `CHOCO_ADMIN_BOOTSTRAP_PASSWORD` | First administrator, created once. Clear these afterwards. |
 
 Never commit `.env.production`, `secrets/*.pem`, or any value from this table. `.gitignore` already
@@ -134,7 +135,30 @@ supported shapes are:
    proxying to the same ports.
 
 The gateway already sends HSTS (`max-age=31536000; includeSubDomains`), `X-Frame-Options: DENY` and
-`Referrer-Policy: no-referrer`. Once TLS is terminated in front of it, those headers take effect.
+`Referrer-Policy: no-referrer`. `X-Frame-Options` and `Referrer-Policy` are unconditional. HSTS is
+sent only when the request is understood to be HTTPS, because sending it on a plain-HTTP host would
+pin a scheme the host does not serve.
+
+Behind a proxy that terminates TLS, the application sees plain HTTP, so it needs to be told the
+client's scheme came over HTTPS. Set `CHOCO_HTTP_TRUSTED_PROXIES` (property
+`choco.http.trusted-proxies`) to the address the proxy connects from, and have the proxy send
+`X-Forwarded-Proto: https`:
+
+```yaml
+  gateway:
+    environment:
+      CHOCO_HTTP_TRUSTED_PROXIES: ${TRUSTED_PROXY_ADDRESS:?set TRUSTED_PROXY_ADDRESS in .env.production}
+```
+
+The header is trusted **only** from an address in that list. This is deliberate: `X-Forwarded-Proto`
+and `X-Forwarded-For` are client-supplied, and the same list is what stops the rate limiter from
+being bypassed by a forged `X-Forwarded-For`. With the list empty — the default — the forwarded
+scheme is ignored entirely and a plain request never carries HSTS. Do **not** set
+`server.forward-headers-strategy=framework`: it rewrites the client address from `X-Forwarded-For`
+unconditionally and defeats that protection.
+
+Verify after deployment that a real HTTPS request carries `Strict-Transport-Security`, and that a
+plain-HTTP request to the same host either redirects to HTTPS or carries no HSTS.
 
 Local development deliberately runs over plain HTTP on localhost. Do not claim production HTTPS is
 configured until a real certificate is serving real traffic.

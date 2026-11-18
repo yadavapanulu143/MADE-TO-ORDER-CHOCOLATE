@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1233 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1254 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
 dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
@@ -639,14 +639,16 @@ one seam that is faked (a stubbed `fetch`); nothing the app itself owns is mocke
 
 | # | Requirement | Status |
 |---|---|---|
-| 12.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
-| 12.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
-| 12.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, and gitleaks + OWASP dependency-check + Trivy. No workflow pushes to a registry yet (none is configured). |
-| 12.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
-| 12.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
-| 12.6 | Centralized logging | DONE (infra) — structured JSON on stdout; Loki + Promtail under the `observability` profile. |
-| 12.7 | Distributed tracing | DONE (infra) — Micrometer Tracing + OTLP exporter to Tempo, gated by `CHOCO_OTLP_ENABLED` so a service does not log a failed export every few seconds when no collector runs. |
-| 12.8 | Deployment documentation | DONE — `docs/deployment.md`: components, local and production shapes, the signing key, HTTPS placement, durability and volumes, backup/restore, operations and troubleshooting. |
+| 14.1 | Docker Compose (full app) | DONE — `docker-compose.app.yml` builds and starts all ten application containers alongside the infrastructure; the whole stack reports `(healthy)`. `docker-compose.prod.yml` overlays the production shape (required secrets, read-only root filesystems, no published infrastructure ports). |
+| 14.2 | Service Dockerfiles | DONE — one parameterised `backend/Dockerfile` (build arg `SERVICE_MODULE`/`SERVICE_JAR`) builds the gateway and all seven services; `frontend/{storefront,admin}/Dockerfile` build the two React bundles behind nginx. Every image builds in CI and locally. |
+| 14.3 | GitHub Actions CI/CD | DONE — `.github/workflows/{backend,frontend,images,security}.yml`: `mvn verify`, frontend typecheck/test/build, per-service image builds, and gitleaks + OWASP dependency-check + Trivy. No workflow pushes to a registry yet (none is configured). |
+| 14.4 | Kubernetes-ready manifests | TODO — the images are stateless and twelve-factor (config from the environment, health probes on `/actuator/health/{readiness,liveness}`), so they are manifest-ready, but no Kubernetes manifests are authored. Deliberately deferred: no cluster is in scope, and inventing manifests that nothing runs would be ceremony. |
+| 14.5 | Monitoring dashboards | DONE (infra) — Prometheus scrapes `/actuator/prometheus`; Grafana with provisioned datasources and dashboards runs under the `observability` profile. |
+| 14.6 | Centralized logging | DONE (infra) — structured JSON on stdout; Loki + Promtail under the `observability` profile. |
+| 14.7 | Distributed tracing | DONE (infra) — Micrometer Tracing + OTLP exporter to Tempo, gated by `CHOCO_OTLP_ENABLED` so a service does not log a failed export every few seconds when no collector runs. |
+| 14.8 | Deployment documentation | DONE — `docs/deployment.md`: components, local and production shapes, the signing key, HTTPS placement, durability and volumes, backup/restore, operations and troubleshooting. |
+| 14.9 | Production secret hardening (F-2) | DONE — `ProductionConfigurationGuard` (a `prod`-profile listener in `common-security`) refuses to start when a configured capability's password is missing, blank or still a development default; the prod compose overlay additionally requires every credential with `${VAR:?}` and now activates the profile. Scoped per capability so the gateway (no datasource) is not blocked by a database check. `ProductionDefaultsDriftTest` reads every service `application.yml` and fails if a new `${...:choco_..._pw}` default is not guarded. |
+| 14.10 | Proxy-aware HSTS (F-3) | DONE — `TrustedProxyHttpsMatcher` emits HSTS when the request is directly secure or when a configured trusted proxy (`choco.http.trusted-proxies`) reports `X-Forwarded-Proto: https`; an untrusted peer can neither force HSTS on nor suppress it. Deliberately does **not** use `server.forward-headers-strategy=framework`, which would rewrite the client address from `X-Forwarded-For` and defeat the rate-limiter's trust rule. |
 
 **Verified locally this milestone:** all ten images built; `docker compose -f docker-compose.yml -f
 docker-compose.app.yml up -d` brought fourteen containers to `(healthy)`; a registration → email OTP
@@ -659,6 +661,13 @@ with every required secret set and fails closed (naming the variable) when one i
 `SMS_API_KEY`, …) that no compose file reads, so an operator copying the template would have had
 their settings silently ignored; it now lists exactly the names the compose files interpolate. The
 production override read `SMS_API_KEY` where the app override reads `CHOCO_SMS_API_KEY`; unified.
+
+**Security hardening closed while finishing this phase (F-2, F-3):** development credential defaults
+were reachable in a production-shaped deployment if it did not go through the compose overlay, and
+HSTS was never emitted behind a TLS-terminating proxy because the request is seen as plain HTTP.
+Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `ProductionDefaultsDriftTest`
+(1), `TrustedProxyHttpsMatcherTest` (8) and `GatewayHstsIT` (2, over real HTTP). See
+`docs/security-review.md` for the findings and evidence.
 
 ---
 

@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1269 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1270 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
 dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
@@ -87,7 +87,18 @@ idempotency the dedupe actually needs — while a genuinely new event gets its o
 `NotificationJourneyIT.aSecondRescheduleIsNotSwallowedByTheDedupeKey` and
 `aRedeliveredRescheduleIsDeduplicated` pin both directions — a new event sends, the same event does
 not. `fulfilment-domain` moves 88 → 90, `fulfilment-app` 28 → 31, `notification-application` 34 → 35
-and `notification-app` 22 → 27 tests; the cumulative total moves 1262 → **1269**.
+and `notification-app` 22 → 28 tests; the cumulative total moves 1262 → **1270**.
+
+**The provider-outage path is now exercised against a real transport failure (Phase 10).** The
+documentation claimed a `NotificationJourneyIT` that proves a provider outage is recorded rather than
+thrown, but no such test existed — the unit suite only drove the failure through a fake `MessageSender`
+that throws `MessageDeliveryException` directly, which cannot catch a wrong catch clause because a fake
+throws whatever the test tells it to. The new
+`NotificationJourneyIT.providerOutageIsRecordedNotThrown` stops the real GreenMail SMTP sink, so the
+production `SmtpEmailSender` fails with a real `MailException`, `ChannelMessageSender` wraps it in the
+`MessageDeliveryException` the consumer actually catches, and the assertion is that the notification
+rests `FAILED` in the database with its attempt recorded rather than the listener throwing and losing the
+message.
 
 **Serviceability public-path mismatch fixed (Phase 11.3).** Driving the whole journey with
 `scripts/e2e-journey.py` surfaced a real defect the per-service integration tests had missed: the
@@ -473,7 +484,7 @@ gateway.
 | Class | Tests | What it proves |
 |---|---|---|
 | SchemaAndPersistenceIT | 5 | Flyway applied V1; Hibernate `validate` matches; a negative attempt count, a blank dedupe key and an out-of-range status are rejected, and a duplicate dedupe key is refused by the unique index |
-| NotificationJourneyIT | 11 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the event gave, a rescheduled delivery tells the customer a new attempt is planned, a second reschedule on one delivery is not swallowed by the dedupe key (which is keyed on the event id, not the delivery id), and an `order.invoice-issued` emails the customer the invoice number and the billed total |
+| NotificationJourneyIT | 12 | A real event on the broker becomes one message in the SMTP sink: the greeting is filled from the contact projection, a redelivery is suppressed by the dedupe key, a provider outage is recorded rather than thrown, a low-stock alert carries the real level and threshold, an assigned delivery reaches the customer, a failed delivery carries the reason the event gave, a rescheduled delivery tells the customer a new attempt is planned, a second reschedule on one delivery is not swallowed by the dedupe key (which is keyed on the event id, not the delivery id), and an `order.invoice-issued` emails the customer the invoice number and the billed total |
 | AdminNotificationApiIT | 7 | The admin log over real HTTP: list, counters and read are permission gated; a customer is refused; an unknown id is a 404; a delivered notification cannot be resent (409); a customer cannot trigger a resend (403) |
 | CleanArchitectureTest | 4 | The domain and application layers depend on no framework, adapter or provider SDK; the mail/SMS sender never leaks into the domain |
 
@@ -775,12 +786,12 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | fulfilment-app | 4 | 27 | 31 |
 | notification-domain | 13 | – | 13 |
 | notification-application | 35 | – | 35 |
-| notification-app | 4 | 23 | 27 |
+| notification-app | 4 | 24 | 28 |
 | reporting-domain | 20 | – | 20 |
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **967** | **302** | **1269** |
+| **Total** | **967** | **303** | **1270** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from

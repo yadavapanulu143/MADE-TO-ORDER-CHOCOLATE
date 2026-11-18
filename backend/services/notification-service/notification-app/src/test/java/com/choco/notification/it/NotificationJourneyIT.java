@@ -86,6 +86,35 @@ class NotificationJourneyIT extends AbstractNotificationIntegrationTest {
     }
 
     @Test
+    @DisplayName("a provider outage is recorded on the notification, not thrown away")
+    void providerOutageIsRecordedNotThrown() throws Exception {
+        registerCustomer();
+
+        // A real transport outage, not a fake: the SMTP sink is stopped, so the production
+        // SmtpEmailSender fails with a real MailException and ChannelMessageSender wraps it in a
+        // MessageDeliveryException — the exact exception the consumer catches. A fake sender that threw
+        // some other type would let a wrong catch clause pass here and fail only in production.
+        GREEN_MAIL.stop();
+        try {
+            publish(EventTypes.ORDER_CONFIRMED, "order-outage", Map.of(
+                    "orderId", "order-outage",
+                    "orderNumber", "CHOCO-2026001-99",
+                    "customerId", CUSTOMER_ID.toString()));
+
+            // The consumer must survive the outage: the notification is persisted and rests FAILED with
+            // its error recorded, rather than the message being lost or the listener throwing.
+            await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                    assertThat(statusOfOrder("order-outage")).isEqualTo("FAILED"));
+        } finally {
+            GREEN_MAIL.start();
+        }
+
+        assertThat(notificationCount())
+                .as("the failed notification stays on the record so the seller can see and resend it")
+                .isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("a customer contact change re-addresses later messages")
     void contactChangeUpdatesTheProjection() throws Exception {
         registerCustomer();
@@ -359,6 +388,20 @@ class NotificationJourneyIT extends AbstractNotificationIntegrationTest {
              var rows = statement.executeQuery("SELECT count(*) FROM notifications")) {
             rows.next();
             return rows.getInt(1);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The stored status of the notification a given order produced, or null if none exists yet. */
+    private String statusOfOrder(String orderId) {
+        try (var connection = POSTGRES.createConnection("");
+             var statement = connection.prepareStatement(
+                     "SELECT status FROM notifications WHERE reference_id = ?")) {
+            statement.setString(1, orderId);
+            try (var rows = statement.executeQuery()) {
+                return rows.next() ? rows.getString(1) : null;
+            }
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

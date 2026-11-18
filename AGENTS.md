@@ -707,7 +707,7 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1269 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1270 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
@@ -740,12 +740,12 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | fulfilment-app | 31 (4 architecture + 27 integration: real PostgreSQL, Redis, RabbitMQ) |
 | notification-domain | 13 |
 | notification-application | 35 |
-| notification-app | 27 (4 architecture + 23 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
+| notification-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ, GreenMail SMTP sink) |
 | reporting-domain | 20 |
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1269** |
+| **total** | **1270** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently

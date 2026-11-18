@@ -419,6 +419,15 @@ Grafana http://localhost:3000 (admin / choco_grafana_pw), RabbitMQ http://localh
     (it fails with 401 if the fulfilment `public-paths` is emptied), and the companion
     `anonymousCannotReachAdmin` proves the change did not open the administrative surface.
 
+49. **A fake that throws the exact exception the code catches cannot prove the catch is right.** The
+    provider-failure path was covered only by a unit test whose fake `MessageSender` throws
+    `MessageDeliveryException` directly — the very type `NotificationDispatchService.attempt` catches.
+    That passes whether or not the real `SmtpEmailSender` actually surfaces that type: a fake throws
+    whatever the test tells it to. `NotificationJourneyIT.providerOutageIsRecordedNotThrown` stops the
+    real GreenMail sink instead, so a real `MailException` travels through the real
+    `ChannelMessageSender`, and the test fails if the production wrap is ever removed. When the thing
+    under test is *which exception a transport raises*, drive a real failure, not a fake one.
+
 ## Payment service conventions
 
 The payment service follows the same five-module shape. Things specific to it:

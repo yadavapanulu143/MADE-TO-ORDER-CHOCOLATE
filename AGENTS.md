@@ -695,14 +695,14 @@ decoder rejects it. All service `Abstract*IntegrationTest` bases and the gateway
 
 ## Test tally
 
-`mvn clean verify` at `backend/`: **1233 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
+`mvn clean verify` at `backend/`: **1260 tests, 0 failures, 0 errors, 0 skipped**. Counts move as work
 lands; treat this table as a map of where the tests are, not a number to keep in sync by hand.
 
 | Module | Tests |
 |---|---|
 | common-core | 40 |
 | common-web | 7 |
-| common-security | 29 |
+| common-security | 48 |
 | common-events | 6 |
 | common-redis | 9 (integration, real Redis: rate limiter + token revocation) |
 | identity-domain | 56 |
@@ -722,7 +722,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | payment-application | 31 |
 | payment-adapters-out | 18 (real HMAC signature algorithms) |
 | payment-app | 30 (5 architecture + 25 integration: real PostgreSQL, Redis, RabbitMQ, HMAC-verifying provider stub) |
-| gateway | 59 (16 unit + 43 integration: real Redis) |
+| gateway | 67 (16 unit + 51 integration: real Redis) |
 | fulfilment-domain | 88 |
 | fulfilment-application | 37 |
 | fulfilment-app | 28 (4 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
@@ -733,7 +733,7 @@ lands; treat this table as a map of where the tests are, not a number to keep in
 | reporting-application | 42 |
 | reporting-adapters-out | 10 (CSV/XLSX writers, real spreadsheet library) |
 | reporting-app | 29 (5 architecture + 24 integration: real PostgreSQL, Redis, RabbitMQ) |
-| **total** | **1212** |
+| **total** | **1260** |
 
 **Tally from each module's `Results:` block, not by summing report files.** A nested `@Nested` class
 writes its own report file with `Tests run: 0` at the outer level, so a per-file sum silently
@@ -748,7 +748,7 @@ to a hand edit.
 
 ### API Gateway tests (`*IT`, run by `mvn verify`)
 
-`gateway` carries four integration classes under `src/test/java/com/choco/gateway/it`
+`gateway` carries six integration classes under `src/test/java/com/choco/gateway/it`
 (`AbstractGatewayIntegrationTest` starts real Redis via Testcontainers and serves the gateway on a
 random port). Each downstream is a MockWebServer, so the tests assert what the gateway *forwarded*,
 not only the status it returned.
@@ -766,6 +766,12 @@ not only the status it returned.
 - `GatewaySecurityIT` — registration and JWKS are public; the customer profile path is not; a 401
   carries a problem-detail body; an allowed-origin preflight is answered with that origin and an
   unknown origin is never wildcarded.
+- `GatewayHstsIT` — a request over plain HTTP gets no `Strict-Transport-Security`; a trusted proxy's
+  `X-Forwarded-Proto: https` does; a forged one from an untrusted peer does not.
+- `GatewayRevocationIT` — the edge consults the revocation store: a live token is proxied, a revoked
+  session is a 401 that never reaches the downstream, a logged-out administrator cannot reach
+  `/api/v1/admin/notifications`, revocation is scoped to one session, and a subject cutoff refuses only
+  tokens issued before it.
 
 ### Integration tests (`*IT`, run by `mvn verify`)
 

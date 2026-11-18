@@ -3,7 +3,7 @@
 Tracks every requirement from the master prompt. Statuses: **DONE**, **IN PROGRESS**, **TODO**.
 A phase is only marked DONE when its tests run green and the behaviour has been verified.
 
-**Last verified:** `mvn clean verify` in `backend/` — **1254 tests, 0 failures, 0 errors, 0 skipped**
+**Last verified:** `mvn clean verify` in `backend/` — **1260 tests, 0 failures, 0 errors, 0 skipped**
 (all modules SUCCESS; Phase 11: invoice issuance from a verified payment, the customer and seller
 invoice surfaces, the `order.invoice-issued` notification, and the new `reporting-service` read models,
 dashboards and CSV/XLSX exports; plus access-token revocation enforced on logout, refresh rotation,
@@ -704,7 +704,7 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 |---|---|---|---|
 | common-core | 40 | – | 40 |
 | common-web | 7 | – | 7 |
-| common-security | 29 | – | 29 |
+| common-security | 48 | – | 48 |
 | common-events | 6 | – | 6 |
 | common-redis | – | 9 | 9 |
 | identity-domain | 56 | – | 56 |
@@ -724,7 +724,7 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | payment-application | 31 | – | 31 |
 | payment-adapters-out | 18 | – | 18 |
 | payment-app | 5 | 25 | 30 |
-| gateway | 16 | 43 | 59 |
+| gateway | 16 | 51 | 67 |
 | fulfilment-domain | 88 | – | 88 |
 | fulfilment-application | 37 | – | 37 |
 | fulfilment-app | 4 | 24 | 28 |
@@ -735,7 +735,7 @@ Both are fixed and covered — `ProductionConfigurationGuardTest` (10), `Product
 | reporting-application | 42 | – | 42 |
 | reporting-adapters-out | 10 | – | 10 |
 | reporting-app | 5 | 24 | 29 |
-| **Total** | **945** | **288** | **1233** |
+| **Total** | **964** | **296** | **1260** |
 
 Counts come from `mvn clean verify` at `backend/`; every suite reported 0 failures, 0 errors, 0
 skipped. Treat this as a map of where the tests are, not a number to keep in sync by hand. Tally from
@@ -750,6 +750,8 @@ files undercounts and a naive per-file sum is not the total.
 | RateLimitIT | 4 | A burst is throttled once the allowance is spent; auth paths use the tighter allowance; a throttled request never reaches the service; the auth and general buckets are counted independently |
 | CircuitBreakerIT | 2 | Repeated 5xx from a service opens the breaker and the gateway answers 503 with an RFC 9457 body instead of propagating the error |
 | GatewaySecurityIT | 6 | Registration and JWKS are public; the customer profile path is not; a 401 carries a problem-detail body; an allowed-origin preflight is answered with that origin and an unknown origin is never wildcarded |
+| GatewayHstsIT | 2 | A request over plain HTTP gets no `Strict-Transport-Security`; a trusted proxy's `X-Forwarded-Proto: https` does; a forged one from an untrusted peer does not |
+| GatewayRevocationIT | 6 | The edge consults the Redis revocation store before forwarding: a live token is proxied, a revoked session is a 401 that never reaches the downstream, a logged-out administrator cannot reach `/api/v1/admin/notifications`, revocation is scoped to one session, and a subject cutoff refuses only tokens issued before it |
 
 ### Identity integration tests (`mvn verify`)
 

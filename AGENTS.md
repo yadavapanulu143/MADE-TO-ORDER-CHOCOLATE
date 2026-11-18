@@ -29,13 +29,16 @@ integration and future session. They are not optional and are not renegotiated p
    Admin Dashboard → Docker Compose/Deployment/CI-CD → End-to-End Testing and Handover. No
    priority-based reordering. Finish one module before starting the next, then proceed without
    asking.
-   - Progress: **Identity (done) → API Gateway (done) → Catalog (done) → Order Management (done) →
-     Razorpay Payment (done, `707f193`) → Made-to-Order Production and Seller-Managed Delivery (done,
-     the `fulfilment-service`) → Notification (done, the `notification-service`) → Invoice issuance
-     and access (done, in the `order-service`) → Reporting and Customer Exports (done, the
-     `reporting-service`) → Customer Storefront (done, `frontend/storefront`)**. The next module is
-     the **Admin Dashboard** (Phase 13), then Docker Compose/Deployment/CI-CD (Phase 14) and the
-     end-to-end verification and handover (Phase 15).
+   - Progress: **all roadmap modules are complete.** Identity (done, `d507fa2`) → API Gateway
+     (done) → Catalog (done) → Order Management (done) → Razorpay Payment (done, `707f193`) →
+     Made-to-Order Production and Seller-Managed Delivery (done, the `fulfilment-service`) →
+     Notification (done, the `notification-service`) → Invoice issuance and access (done, in the
+     `order-service`) → Reporting and Customer Exports (done, the `reporting-service`) → Customer
+     Storefront (done, `frontend/storefront`) → Admin Dashboard (done, `frontend/admin`) → Docker
+     Compose / Deployment / CI-CD (done, Phase 14). The end-to-end journey and handover are done.
+     The only open item is **14.4 Kubernetes-ready manifests**, deliberately deferred because no
+     cluster is in scope; the images are already twelve-factor and probe-ready, so authoring
+     manifests nothing runs would be ceremony. `docs/development-progress.md` is the source of truth.
 3. **Extremely comprehensive testing is mandatory.** Aim for maximum meaningful coverage of every
    execution path, branch, boundary, malformed input, invalid transition, authz boundary,
    customer-to-customer isolation, admin boundary, concurrency/race, transaction/rollback, DB
